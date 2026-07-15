@@ -1,0 +1,17 @@
+{
+    "name": "YOUR_PACKAGE_ID.Editor",
+    "references": [
+        "YOUR_PACKAGE_ID.Runtime"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
