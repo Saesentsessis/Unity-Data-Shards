@@ -40,7 +40,7 @@ using System.Globalization;
 using System.Linq;
 using System.Text;
 
-namespace YOUR_PACKAGE_ID.Installer.SimpleJSON
+namespace YOUR_ASSEMBLY_NAME.Installer.SimpleJSON
 {
     public enum JSONNodeType
     {

@@ -11,11 +11,11 @@
 using System.IO;
 using System.Linq;
 using UnityEngine;
-using YOUR_PACKAGE_ID.Installer.SimpleJSON;
+using YOUR_ASSEMBLY_NAME.Installer.SimpleJSON;
 using System.Runtime.CompilerServices;
 
-[assembly: InternalsVisibleTo("YOUR_PACKAGE_ID.Installer.Tests")]
-namespace YOUR_PACKAGE_ID.Installer
+[assembly: InternalsVisibleTo("YOUR_ASSEMBLY_NAME.Installer.Tests")]
+namespace YOUR_ASSEMBLY_NAME.Installer
 {
     public static partial class Installer
     {

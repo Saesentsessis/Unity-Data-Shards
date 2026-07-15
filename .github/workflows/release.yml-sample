@@ -161,7 +161,7 @@ jobs:
           customImage: "unityci/editor:ubuntu-${{ env.INSTALLER_UNITY_VERSION }}-base-3"
           buildName: YOUR_PACKAGE_NAME_INSTALLER_FILE
           buildsPath: build
-          buildMethod: YOUR_PACKAGE_ID.Installer.PackageExporter.ExportPackage
+          buildMethod: YOUR_ASSEMBLY_NAME.Installer.PackageExporter.ExportPackage
           customParameters: -CI true -GITHUB_ACTIONS true
 
       - name: Upload Unity Package as artifact
@@ -242,13 +242,11 @@ jobs:
 
           archive="${archives[0]}"
           archive_basename="$(basename "$archive")"
-          # OpenUPM consumes the asset via the `githubReleaseAssetName: 'YOUR_PACKAGE_ID-'`
-          # prefix documented in docs/openupm-signing.md. Enforce the contract here so a future
-          # `upm pack` naming change fails CI loudly instead of silently breaking OpenUPM pickup.
-          # NOTE: replace `YOUR_PACKAGE_ID` below with your real package id (e.g. com.company.package)
-          # when you adopt this sample as release.yml.
-          if [[ "$archive_basename" != YOUR_PACKAGE_ID-* ]]; then
-            printf 'Signed archive basename %q does not begin with the OpenUPM-expected prefix YOUR_PACKAGE_ID- (see docs/openupm-signing.md)\n' "$archive_basename" >&2
+          # OpenUPM consumes the asset via the `githubReleaseAssetName: 'YOUR_PACKAGE_ID_LOWERCASE-'`
+          # prefix (UPM package name from package.json), documented in docs/openupm-signing.md.
+          # Enforce the contract here so a future `upm pack` naming change fails CI loudly.
+          if [[ "$archive_basename" != YOUR_PACKAGE_ID_LOWERCASE-* ]]; then
+            printf 'Signed archive basename %q does not begin with the OpenUPM-expected prefix YOUR_PACKAGE_ID_LOWERCASE- (see docs/openupm-signing.md)\n' "$archive_basename" >&2
             exit 1
           fi
 
@@ -343,7 +341,7 @@ jobs:
           fail_on_unmatched_files: true
           files: |
             ./assets/YOUR_PACKAGE_NAME_INSTALLER_FILE.unitypackage
-            ./assets/YOUR_PACKAGE_ID-*.tgz
+            ./assets/YOUR_PACKAGE_ID_LOWERCASE-*.tgz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

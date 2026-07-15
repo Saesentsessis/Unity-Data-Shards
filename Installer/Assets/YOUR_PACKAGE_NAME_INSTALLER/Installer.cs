@@ -10,7 +10,7 @@
 #nullable enable
 using UnityEditor;
 
-namespace YOUR_PACKAGE_ID.Installer
+namespace YOUR_ASSEMBLY_NAME.Installer
 {
     [InitializeOnLoad]
     public static partial class Installer

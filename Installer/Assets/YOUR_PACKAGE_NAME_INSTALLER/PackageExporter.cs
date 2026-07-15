@@ -12,7 +12,7 @@ using UnityEngine;
 using UnityEditor;
 using System.IO;
 
-namespace YOUR_PACKAGE_ID.Installer
+namespace YOUR_ASSEMBLY_NAME.Installer
 {
     public static class PackageExporter
     {

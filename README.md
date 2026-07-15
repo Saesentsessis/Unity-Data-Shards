@@ -18,15 +18,25 @@ Use GitHub **Use this template** on [Saesentsessis/Unity-Package-Template](https
 
 ### 3. Initialize the project
 
-Run the initialization script to rename the package and replace all placeholders. Package id is chosen **per repository** — never bake a product id into the template itself.
+Run the initialization script to rename the package and replace all placeholders. Package id and assembly root are chosen **per repository** — never bake product identity into the template itself.
 
 ```powershell
-./commands/init.ps1 -PackageId "com.company.package" -PackageName "My Package" -GitHubRepository "YourGitHubUsername/your-repo-name"
+./commands/init.ps1 `
+  -PackageId "com.company.package" `
+  -AssemblyName "MyPackage" `
+  -PackageName "My Package" `
+  -GitHubRepository "YourGitHubUsername/your-repo-name"
 ```
 
+| Parameter | Placeholder(s) | Purpose |
+|-----------|----------------|---------|
+| `PackageId` | `YOUR_PACKAGE_ID`, `YOUR_PACKAGE_ID_LOWERCASE` | UPM name (`package.json`), test manifests, release `.tgz` prefix, `Installer.PackageId` |
+| `AssemblyName` | `YOUR_ASSEMBLY_NAME` | Asmdef names/filenames, C# namespaces, CI `buildMethod` |
+| `PackageName` | `YOUR_PACKAGE_NAME` (+ installer variants) | Display / descriptive text and installer folder naming only |
+
 This script will:
-- Rename directories and files.
-- Replace `YOUR_PACKAGE_ID`, `YOUR_PACKAGE_NAME`, `YOUR_GITHUB_USERNAME_REPOSITORY`, etc. in file contents and names.
+- Rename directories and files (including `YOUR_ASSEMBLY_NAME.*.asmdef`).
+- Replace the placeholders above in file contents.
 
 ### 4. Update `package.json`
 

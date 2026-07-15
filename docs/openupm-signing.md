@@ -1,10 +1,11 @@
 # OpenUPM Package Signing
 
-> **Template note:** This is a template document. Replace `YOUR_PACKAGE_ID`
-> (your reverse-domain package id, e.g. `com.company.package`) and
+> **Template note:** This is a template document. Replace `YOUR_PACKAGE_ID` /
+> `YOUR_PACKAGE_ID_LOWERCASE` (UPM reverse-domain id, e.g. `com.company.package`) and
 > `YOUR_GITHUB_USERNAME/YOUR_REPO` (your `owner/repo` slug) with your real values when you
-> adopt this package as a real one. The placeholders match those used in
-> `.github/workflows/release.yml-sample`.
+> adopt this package as a real one. Assembly/namespace identity uses a separate
+> `YOUR_ASSEMBLY_NAME` token (see `commands/init.ps1 -AssemblyName`); signing and OpenUPM
+> asset names always follow the UPM package id, not the assembly root.
 
 Unity 6.3 introduced a package-signature check that surfaces a trust warning for
 unsigned UPM packages installed from third-party registries (including OpenUPM).
@@ -31,7 +32,7 @@ The signing step is implemented as the `build-signed-upm-package` job in
 version-bump release commit, packs the package at
 `Unity-Package/Assets/root/` with Unity's UPM CLI, verifies the resulting archive
 contains `package/.attestation.p7m` and that its basename begins with
-`YOUR_PACKAGE_ID-`, and uploads the signed `.tgz` as a `signed-upm-package`
+`YOUR_PACKAGE_ID_LOWERCASE-`, and uploads the signed `.tgz` as a `signed-upm-package`
 workflow artifact.
 
 The artifact is then consumed by the atomic publish step in `release-unity-plugin`,
@@ -148,7 +149,7 @@ the installer `.unitypackage`, and may add more assets later, so the prefix guar
 prevents a future-breaking failure mode):
 
 ```yaml
-githubReleaseAssetName: 'YOUR_PACKAGE_ID-'
+githubReleaseAssetName: 'YOUR_PACKAGE_ID_LOWERCASE-'
 ```
 
 ## Verifying signing worked
@@ -156,7 +157,7 @@ githubReleaseAssetName: 'YOUR_PACKAGE_ID-'
 After the next release ships:
 
 1. Go to the release page for the new version and confirm a
-   `YOUR_PACKAGE_ID-<version>.tgz` asset is attached alongside the
+   `YOUR_PACKAGE_ID_LOWERCASE-<version>.tgz` asset is attached alongside the
    `.unitypackage`. The single-step publish runs only after the signed tarball is
    built and verified, so a successful release run should always include the
    signed asset.
@@ -164,7 +165,7 @@ After the next release ships:
 
    ```bash
    curl -fsSL -o package.tgz \
-     https://github.com/YOUR_GITHUB_USERNAME/YOUR_REPO/releases/download/<version>/YOUR_PACKAGE_ID-<version>.tgz
+     https://github.com/YOUR_GITHUB_USERNAME/YOUR_REPO/releases/download/<version>/YOUR_PACKAGE_ID_LOWERCASE-<version>.tgz
    tar -tzf package.tgz | grep '\.attestation\.p7m$'
    # expected: package/.attestation.p7m
    ```

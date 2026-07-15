@@ -1,0 +1,17 @@
+{
+    "name": "YOUR_ASSEMBLY_NAME.Editor",
+    "references": [
+        "YOUR_ASSEMBLY_NAME.Runtime"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

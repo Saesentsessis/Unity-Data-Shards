@@ -9,13 +9,13 @@
 */
 using System.IO;
 using NUnit.Framework;
-using YOUR_PACKAGE_ID.Installer.SimpleJSON;
+using YOUR_ASSEMBLY_NAME.Installer.SimpleJSON;
 
-namespace YOUR_PACKAGE_ID.Installer.Tests
+namespace YOUR_ASSEMBLY_NAME.Installer.Tests
 {
     public class VersionComparisonTests
     {
-        const string TestManifestPath = "Temp/YOUR_PACKAGE_ID.Installer.Tests/test_manifest.json";
+        const string TestManifestPath = "Temp/YOUR_ASSEMBLY_NAME.Installer.Tests/test_manifest.json";
         const string PackageId = "YOUR_PACKAGE_ID_LOWERCASE";
 
         [SetUp]

@@ -11,14 +11,14 @@ Follow the main guide: [Unity Package Template README](https://github.com/Saesen
 Per-repository setup:
 
 ```powershell
-./commands/init.ps1 -PackageId "com.company.package" -PackageName "My Package" -GitHubRepository "YourGitHubUsername/your-repo-name"
+./commands/init.ps1 -PackageId "com.company.package" -AssemblyName "MyPackage" -PackageName "My Package" -GitHubRepository "YourGitHubUsername/your-repo-name"
 ```
 
 Manual rename reference (if needed): [docs/Manual-Package-Rename.md](../../../docs/Manual-Package-Rename.md)
 
 ## CI export
 
-Release CI calls `YOUR_PACKAGE_ID.Installer.PackageExporter.ExportPackage` via GameCI `unity-builder@v5` to produce `YOUR_PACKAGE_NAME_INSTALLER_FILE.unitypackage`.
+Release CI calls `YOUR_ASSEMBLY_NAME.Installer.PackageExporter.ExportPackage` via GameCI `unity-builder@v5` to produce `YOUR_PACKAGE_NAME_INSTALLER_FILE.unitypackage`.
 
 ## Deploy docs
 
