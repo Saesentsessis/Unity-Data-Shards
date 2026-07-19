@@ -1,0 +1,29 @@
+{
+    "name": "Saesentsessis.Persistence.CloudSave",
+    "rootNamespace": "",
+    "references": [
+        "Saesentsessis.Persistence.Runtime",
+        "UniTask",
+        "Unity.Collections",
+        "Unity.Services.Core",
+        "Unity.Services.Authentication",
+        "Unity.Services.CloudSave"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [
+        "PERSISTENCE_HAS_CLOUDSAVE"
+    ],
+    "versionDefines": [
+        {
+            "name": "com.unity.services.cloudsave",
+            "expression": "2.0.0",
+            "define": "PERSISTENCE_HAS_CLOUDSAVE"
+        }
+    ],
+    "noEngineReferences": false
+}
