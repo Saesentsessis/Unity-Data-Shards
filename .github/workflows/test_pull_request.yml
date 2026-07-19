@@ -1,0 +1,31 @@
+name: test-pull-request
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main, dev]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+  checks: write
+
+jobs:
+  test-unity:
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - unityVersion: "2022.3.62f3"
+            projectPath: "./Unity-Tests/2022.3.62f3"
+          - unityVersion: "2023.2.22f1"
+            projectPath: "./Unity-Tests/2023.2.22f1"
+          - unityVersion: "6000.3.1f1"
+            projectPath: "./Unity-Tests/6000.3.1f1"
+        testMode: [editmode, playmode, standalone]
+    uses: ./.github/workflows/test_unity_plugin.yml
+    with:
+      projectPath: ${{ matrix.config.projectPath }}
+      unityVersion: ${{ matrix.config.unityVersion }}
+      testMode: ${{ matrix.testMode }}
+    secrets: inherit

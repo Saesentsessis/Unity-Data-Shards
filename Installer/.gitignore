@@ -76,3 +76,8 @@ crashlytics-build.properties
 
 # Claude
 .claude
+# User-specific editor state
+/[Uu]serSettings/
+
+# JetBrains Rider
+.idea/
