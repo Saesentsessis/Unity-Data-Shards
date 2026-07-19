@@ -30,7 +30,7 @@ The signing step is implemented as the `build-signed-upm-package` job in
 [`.github/workflows/release.yml`](../.github/workflows/release.yml) (copied from
 `release.yml-sample`). It runs in parallel with tests and builds on every
 version-bump release commit, packs the package at
-`Unity-Package/Assets/root/` with Unity's UPM CLI, verifies the resulting archive
+`Unity-Data-Shards/Assets/root/` with Unity's UPM CLI, verifies the resulting archive
 contains `package/.attestation.p7m` and that its basename begins with
 `YOUR_PACKAGE_ID_LOWERCASE-`, and uploads the signed `.tgz` as a `signed-upm-package`
 workflow artifact.

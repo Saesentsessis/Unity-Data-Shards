@@ -27,7 +27,7 @@ jobs:
         id: get_version
         uses: martinbeentjes/npm-get-version-action@v1.3.1
         with:
-          path: Unity-Package/Assets/root
+          path: Unity-Data-Shards/Assets/root
 
       - name: Find previous version tag
         id: prev_tag
@@ -159,16 +159,16 @@ jobs:
           projectPath: ./Installer
           unityVersion: ${{ env.INSTALLER_UNITY_VERSION }}
           customImage: "unityci/editor:ubuntu-${{ env.INSTALLER_UNITY_VERSION }}-base-3"
-          buildName: YOUR_PACKAGE_NAME_INSTALLER_FILE
+          buildName: Unity-Data-Shards-Installer
           buildsPath: build
-          buildMethod: YOUR_ASSEMBLY_NAME.Installer.PackageExporter.ExportPackage
+          buildMethod: Saesentsessis.Persistence.Installer.PackageExporter.ExportPackage
           customParameters: -CI true -GITHUB_ACTIONS true
 
       - name: Upload Unity Package as artifact
         uses: actions/upload-artifact@v4
         with:
           name: unity-installer-package
-          path: ./Installer/build/YOUR_PACKAGE_NAME_INSTALLER_FILE.unitypackage
+          path: ./Installer/build/Unity-Data-Shards-Installer.unitypackage
 
   # Builds the signed UPM package (.tgz with package/.attestation.p7m) in parallel
   # with tests/builds and uploads it as a `signed-upm-package` artifact for the
@@ -192,7 +192,7 @@ jobs:
       UPM_SERVICE_ACCOUNT_KEY_ID: ${{ secrets.UPM_SERVICE_ACCOUNT_KEY_ID }}
       UPM_SERVICE_ACCOUNT_KEY_SECRET: ${{ secrets.UPM_SERVICE_ACCOUNT_KEY_SECRET }}
       UPM_ORG_ID: ${{ secrets.UPM_ORG_ID }}
-      PACKAGE_DIR: Unity-Package/Assets/root
+      PACKAGE_DIR: Unity-Data-Shards/Assets/root
       DIST_DIR: /tmp/signed-upm-dist
     steps:
       - name: Verify signing secrets are configured
@@ -242,11 +242,11 @@ jobs:
 
           archive="${archives[0]}"
           archive_basename="$(basename "$archive")"
-          # OpenUPM consumes the asset via the `githubReleaseAssetName: 'YOUR_PACKAGE_ID_LOWERCASE-'`
+          # OpenUPM consumes the asset via the `githubReleaseAssetName: 'com.saesentsessis.unity-data-shards-'`
           # prefix (UPM package name from package.json), documented in docs/openupm-signing.md.
           # Enforce the contract here so a future `upm pack` naming change fails CI loudly.
-          if [[ "$archive_basename" != YOUR_PACKAGE_ID_LOWERCASE-* ]]; then
-            printf 'Signed archive basename %q does not begin with the OpenUPM-expected prefix YOUR_PACKAGE_ID_LOWERCASE- (see docs/openupm-signing.md)\n' "$archive_basename" >&2
+          if [[ "$archive_basename" != com.saesentsessis.unity-data-shards-* ]]; then
+            printf 'Signed archive basename %q does not begin with the OpenUPM-expected prefix com.saesentsessis.unity-data-shards- (see docs/openupm-signing.md)\n' "$archive_basename" >&2
             exit 1
           fi
 
@@ -340,8 +340,8 @@ jobs:
           prerelease: false
           fail_on_unmatched_files: true
           files: |
-            ./assets/YOUR_PACKAGE_NAME_INSTALLER_FILE.unitypackage
-            ./assets/YOUR_PACKAGE_ID_LOWERCASE-*.tgz
+            ./assets/Unity-Data-Shards-Installer.unitypackage
+            ./assets/com.saesentsessis.unity-data-shards-*.tgz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

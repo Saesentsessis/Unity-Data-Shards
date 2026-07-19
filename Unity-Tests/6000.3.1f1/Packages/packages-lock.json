@@ -1,7 +1,7 @@
 {
   "dependencies": {
     "com.ivanmurzak.unity.mcp": {
-      "version": "file:./../../../Unity-Package/Assets/root",
+      "version": "file:./../../../Unity-Data-Shards/Assets/root",
       "depth": 0,
       "source": "local",
       "dependencies": {

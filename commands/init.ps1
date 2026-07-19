@@ -274,7 +274,7 @@ $TargetPaths = @(
         Ignore = @("/Library", "/Temp", "/Logs", "/obj")
     },
     @{
-        Path   = "Unity-Package"
+        Path   = "Unity-Data-Shards"
         Ignore = @("/Library", "/Temp", "/Logs", "/obj")
     },
     @{
