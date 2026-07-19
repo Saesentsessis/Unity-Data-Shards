@@ -1,0 +1,31 @@
+{
+    "name": "Saesentsessis.Persistence.Tests",
+    "rootNamespace": "",
+    "references": [
+        "UnityEngine.TestRunner",
+        "Saesentsessis.Persistence.Runtime",
+        "Saesentsessis.Persistence.Newtonsoft",
+        "UniTask",
+        "Unity.Collections"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll",
+        "Newtonsoft.Json.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ],
+    "versionDefines": [
+        {
+            "name": "com.unity.nuget.newtonsoft-json",
+            "expression": "2.0.0",
+            "define": "PERSISTENCE_HAS_NEWTONSOFT"
+        }
+    ],
+    "noEngineReferences": false
+}
