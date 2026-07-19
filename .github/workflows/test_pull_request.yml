@@ -6,6 +6,10 @@ on:
     branches: [main, dev]
     types: [opened, synchronize, reopened]
 
+permissions:
+  contents: read
+  checks: write
+
 jobs:
   test-unity:
     strategy:

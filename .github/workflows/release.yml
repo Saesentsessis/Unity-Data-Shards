@@ -6,6 +6,10 @@ on:
     branches:
       - main
 
+permissions:
+  contents: write
+  checks: write
+
 env:
   INSTALLER_UNITY_VERSION: 2022.3.62f3
 
