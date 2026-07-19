@@ -1,0 +1,47 @@
+{
+    "name": "com.saesentsessis.unity-data-shards",
+    "displayName": "Unity Data Shards",
+    "author": {
+        "name": "Saesentsessis",
+        "url": "https://github.com/Saesentsessis"
+    },
+    "keywords": [
+        "save",
+        "save-system",
+        "persistence",
+        "serialization",
+        "performance",
+        "unitask",
+        "migration"
+    ],
+    "version": "0.1.0",
+    "unity": "2022.3",
+    "description": "Performance-first save-system abstraction: GUID-identified data shards flowing through a zero-copy arena pipeline into pluggable serializers, layouts, and storage backends. Incremental saves, xxHash3-checksummed envelopes, blob-level schema migrations.",
+    "dependencies": {
+        "com.cysharp.unitask": "2.3.3",
+        "com.unity.collections": "2.1.4",
+        "com.unity.burst": "1.8.0"
+    },
+    "samples": [
+        {
+            "displayName": "System.Text.Json Serializer",
+            "description": "ISerializer backed by System.Text.Json with a zero-alloc SerializableGuid converter. Requires the System.Text.Json DLL.",
+            "path": "Samples~/SystemTextJson"
+        },
+        {
+            "displayName": "MessagePack Serializer",
+            "description": "ISerializer backed by MessagePack-CSharp with a raw 16-byte SerializableGuid formatter. Requires MessagePack + mpc for IL2CPP.",
+            "path": "Samples~/MessagePack"
+        },
+        {
+            "displayName": "MemoryPack Serializer",
+            "description": "ISerializer backed by Cysharp MemoryPack (buffer-native, fastest). Requires MemoryPack; shards must be [MemoryPackable] partial.",
+            "path": "Samples~/MemoryPack"
+        },
+        {
+            "displayName": "protobuf-net Serializer",
+            "description": "ISerializer backed by protobuf-net with auto member mapping and a fixed64 SerializableGuid surrogate. Requires protobuf-net.",
+            "path": "Samples~/ProtobufNet"
+        }
+    ]
+}
