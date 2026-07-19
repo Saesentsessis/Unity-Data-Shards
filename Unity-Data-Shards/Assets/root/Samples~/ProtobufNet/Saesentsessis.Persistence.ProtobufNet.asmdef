@@ -1,0 +1,17 @@
+{
+    "name": "Saesentsessis.Persistence.ProtobufNet",
+    "rootNamespace": "",
+    "references": [
+        "Saesentsessis.Persistence.Runtime",
+        "Unity.Collections"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

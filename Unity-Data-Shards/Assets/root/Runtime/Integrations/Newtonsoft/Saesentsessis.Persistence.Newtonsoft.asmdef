@@ -1,0 +1,27 @@
+{
+    "name": "Saesentsessis.Persistence.Newtonsoft",
+    "rootNamespace": "",
+    "references": [
+        "Saesentsessis.Persistence.Runtime",
+        "UniTask",
+        "Unity.Collections",
+        "Newtonsoft.Json"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": true,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [
+        "PERSISTENCE_HAS_NEWTONSOFT"
+    ],
+    "versionDefines": [
+        {
+            "name": "com.unity.nuget.newtonsoft-json",
+            "expression": "2.0.0",
+            "define": "PERSISTENCE_HAS_NEWTONSOFT"
+        }
+    ],
+    "noEngineReferences": false
+}
