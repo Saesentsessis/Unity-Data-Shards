@@ -81,3 +81,7 @@ crashlytics-build.properties
 
 # JetBrains Rider
 .idea/
+
+# NuGetForUnity restore output (restore via Assets/packages.config)
+/[Aa]ssets/[Pp]ackages/
+/[Aa]ssets/[Pp]ackages.meta
