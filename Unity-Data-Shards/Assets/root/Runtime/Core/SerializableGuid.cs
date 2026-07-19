@@ -2,6 +2,7 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Unity.Burst;
+using Unity.Collections.LowLevel.Unsafe;
 using UnityEngine;
 
 namespace Persistence.Core
@@ -33,7 +34,7 @@ namespace Persistence.Core
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public bool Equals(Guid other)
 		{
-			return Unsafe.As<SerializableGuid, Guid>(ref this) == other;
+			return UnsafeUtility.As<SerializableGuid, Guid>(ref this) == other;
 		}
 
 		[BurstDiscard]
@@ -45,7 +46,7 @@ namespace Persistence.Core
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public override int GetHashCode()
 		{
-			return Unsafe.As<SerializableGuid, Guid>(ref this).GetHashCode();
+			return UnsafeUtility.As<SerializableGuid, Guid>(ref this).GetHashCode();
 		}
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -73,17 +74,17 @@ namespace Persistence.Core
         
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public static implicit operator Guid(SerializableGuid self)
-			=> Unsafe.As<SerializableGuid, Guid>(ref self);
+			=> UnsafeUtility.As<SerializableGuid, Guid>(ref self);
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public static implicit operator SerializableGuid(Guid other)
-			=> Unsafe.As<Guid, SerializableGuid>(ref other);
+			=> UnsafeUtility.As<Guid, SerializableGuid>(ref other);
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public static bool TryParse(string value, out SerializableGuid guid)
 		{
 			var result = Guid.TryParse(value, out var rawResult);
-			guid = Unsafe.As<Guid, SerializableGuid>(ref rawResult);
+			guid = UnsafeUtility.As<Guid, SerializableGuid>(ref rawResult);
 			return result;
 		}
 
@@ -92,7 +93,7 @@ namespace Persistence.Core
 		public static bool TryParse(ReadOnlySpan<char> value, out SerializableGuid guid)
 		{
 			var result = Guid.TryParse(value, out var rawResult);
-			guid = Unsafe.As<Guid, SerializableGuid>(ref rawResult);
+			guid = UnsafeUtility.As<Guid, SerializableGuid>(ref rawResult);
 			return result;
 		}
 
@@ -104,20 +105,20 @@ namespace Persistence.Core
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public bool TryFormatHex(Span<char> destination, out int charsWritten)
 		{
-			var raw = Unsafe.As<SerializableGuid, Guid>(ref this);
+			var raw = UnsafeUtility.As<SerializableGuid, Guid>(ref this);
 			return raw.TryFormat(destination, out charsWritten, "N");
 		}
         
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public override string ToString()
 		{
-			return Unsafe.As<SerializableGuid, Guid>(ref this).ToString("N");
+			return UnsafeUtility.As<SerializableGuid, Guid>(ref this).ToString("N");
 		}
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public string ToString(string format, IFormatProvider formatProvider)
 		{
-			return Unsafe.As<SerializableGuid, Guid>(ref this).ToString(format, formatProvider);
+			return UnsafeUtility.As<SerializableGuid, Guid>(ref this).ToString(format, formatProvider);
 		}
 	}
 }

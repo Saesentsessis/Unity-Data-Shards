@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Runtime.CompilerServices;
 using Persistence.Core;
 using UnityEditor;
 using UnityEngine;
@@ -21,7 +20,7 @@ namespace Persistence.Editor
 		{
 			EditorGUI.BeginProperty(position, label, property);
 			
-			ref var guid = ref Unsafe.Unbox<SerializableGuid>(property.boxedValue);
+			var guid = (SerializableGuid)property.boxedValue;
 
 			position = EditorGUI.PrefixLabel(position, label);
 			

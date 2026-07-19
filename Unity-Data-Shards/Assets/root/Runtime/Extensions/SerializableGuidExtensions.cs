@@ -18,7 +18,7 @@ namespace Persistence
 		{
 			var hash = Hash128.Compute(key);
 			
-			return Unsafe.As<Hash128, SerializableGuid>(ref hash);
+			return UnsafeUtility.As<Hash128, SerializableGuid>(ref hash);
 		}
 
 		/// <summary>
@@ -41,7 +41,7 @@ namespace Persistence
 				hash = Hash128.Compute(array);
 			}
 
-			return Unsafe.As<Hash128, SerializableGuid>(ref hash);
+			return UnsafeUtility.As<Hash128, SerializableGuid>(ref hash);
 		}
 	}
 }
