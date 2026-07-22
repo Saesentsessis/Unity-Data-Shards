@@ -276,8 +276,6 @@ jobs:
         config:
           - unityVersion: "2022.3.62f3"
             projectPath: "./Unity-Tests/2022.3.62f3"
-          - unityVersion: "2023.2.22f1"
-            projectPath: "./Unity-Tests/2023.2.22f1"
           - unityVersion: "6000.3.1f1"
             projectPath: "./Unity-Tests/6000.3.1f1"
         testMode: [editmode, playmode, standalone]

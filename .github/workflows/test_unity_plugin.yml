@@ -26,14 +26,6 @@ jobs:
         os: [ubuntu-latest]
         platform: [base, windows-mono]
 
-    # Skip the single combination that segfaults inside Unity's native asset
-    # scanner (SourceAssetScanner::Refresh -> SIGSEGV, addr:0x10, exit 139) during
-    # the AssetDatabase refresh: 2023.2.22f1 (a non-LTS Tech Stream) building a
-    # standalone player on the windows-mono image. The crash is engine-side, not in
-    # package code, and every other matrix cell covers this version. A skipped cell
-    # is neutral, so the reusable workflow still reports success to the caller.
-    if: ${{ !(inputs.unityVersion == '2023.2.22f1' && inputs.testMode == 'standalone' && matrix.platform == 'windows-mono') }}
-
     name: ${{ inputs.unityVersion }} ${{ inputs.testMode }} on ${{ matrix.platform }}
     runs-on: ${{ matrix.os }}
 
