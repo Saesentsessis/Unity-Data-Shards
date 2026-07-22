@@ -35,7 +35,7 @@ jobs:
 
       - name: Find previous version tag
         id: prev_tag
-        uses: WyriHaximus/github-action-get-previous-tag@v1
+        uses: WyriHaximus/github-action-get-previous-tag@v2
 
       - name: Check if tag exists
         id: tag_exists
