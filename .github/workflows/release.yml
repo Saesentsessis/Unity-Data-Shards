@@ -291,7 +291,7 @@ jobs:
   # Atomic publish point — gated on EVERY prerequisite (tests, installer build,
   # signed UPM package, release notes). Downloads all asset artifacts and creates
   # the GitHub Release + tag with the full asset set in a SINGLE
-  # softprops/action-gh-release@v2 call so a failed upload cannot strand the
+  # softprops/action-gh-release@v3 call so a failed upload cannot strand the
   # release with incomplete assets. Signing failure → no release (hard gate).
   release-unity-plugin:
     runs-on: ubuntu-latest
@@ -335,7 +335,7 @@ jobs:
           ls -la ./assets
 
       - name: Create Tag and Release with all assets
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.check-version-tag.outputs.version }}
           name: ${{ needs.check-version-tag.outputs.version }}
