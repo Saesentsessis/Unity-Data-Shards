@@ -2,12 +2,23 @@ using System;
 using System.Buffers;
 using System.Collections.Generic;
 using System.Threading;
-using Cysharp.Threading.Tasks;
 using Persistence.Core;
 using Persistence.Layout;
 using Persistence.Serialization;
+using Persistence.Threading;
 using Unity.Collections;
 using UnityEngine;
+#if PERSISTENCE_HAS_UNITASK
+using TaskType = Cysharp.Threading.Tasks.UniTask;
+using BoolTask = Cysharp.Threading.Tasks.UniTask<bool>;
+using StorageReadTask = Cysharp.Threading.Tasks.UniTask<Persistence.Core.StorageReadResult>;
+using SaveLayoutTask = Cysharp.Threading.Tasks.UniTask<Persistence.Layout.SaveLayoutResult>;
+#else
+using TaskType = System.Threading.Tasks.Task;
+using BoolTask = System.Threading.Tasks.Task<bool>;
+using StorageReadTask = System.Threading.Tasks.Task<Persistence.Core.StorageReadResult>;
+using SaveLayoutTask = System.Threading.Tasks.Task<Persistence.Layout.SaveLayoutResult>;
+#endif
 
 namespace Persistence.Tests
 {
@@ -108,30 +119,30 @@ namespace Persistence.Tests
 		public readonly Dictionary<string, byte[]> Data = new();
 		public readonly Dictionary<string, int> WriteCounts = new();
 
-		public UniTask<StorageReadResult> TryReadAsync(string key, Allocator allocator, CancellationToken cancellation = default)
+		public StorageReadTask TryReadAsync(string key, Allocator allocator, CancellationToken cancellation = default)
 		{
 			if (!Data.TryGetValue(key, out var bytes))
-				return UniTask.FromResult(StorageReadResult.NotFound);
+				return PersistenceTask.FromResult(StorageReadResult.NotFound);
 
 			var result = new NativeArray<byte>(bytes.Length, allocator, NativeArrayOptions.UninitializedMemory);
 			result.CopyFrom(bytes);
-			return UniTask.FromResult(new StorageReadResult(result));
+			return PersistenceTask.FromResult(new StorageReadResult(result));
 		}
 
-		public UniTask WriteAsync(string key, NativeArray<byte> data, CancellationToken cancellation = default)
+		public TaskType WriteAsync(string key, NativeArray<byte> data, CancellationToken cancellation = default)
 		{
 			Data[key] = data.ToArray();
 			WriteCounts[key] = WriteCounts.TryGetValue(key, out var count) ? count + 1 : 1;
-			return UniTask.CompletedTask;
+			return PersistenceTask.CompletedTask;
 		}
 
-		public UniTask<bool> ExistsAsync(string key, CancellationToken cancellation = default)
-			=> UniTask.FromResult(Data.ContainsKey(key));
+		public BoolTask ExistsAsync(string key, CancellationToken cancellation = default)
+			=> PersistenceTask.FromResult(Data.ContainsKey(key));
 
-		public UniTask DeleteAsync(string key, CancellationToken cancellation = default)
+		public TaskType DeleteAsync(string key, CancellationToken cancellation = default)
 		{
 			Data.Remove(key);
-			return UniTask.CompletedTask;
+			return PersistenceTask.CompletedTask;
 		}
 	}
 
@@ -176,7 +187,7 @@ namespace Persistence.Tests
 
 		public bool RequiresFullSnapshot => FullSnapshot;
 
-		public UniTask WriteAsync(string slot, SaveEnvelope envelope, NativeArray<byte> payload,
+		public TaskType WriteAsync(string slot, SaveEnvelope envelope, NativeArray<byte> payload,
 			NativeArray<ShardBlobRange> ranges, CancellationToken cancellation = default)
 		{
 			WriteCalls++;
@@ -189,16 +200,16 @@ namespace Persistence.Tests
 			for (var i = 0; i < ranges.Length; i++)
 				LastBlobIds.Add(ranges[i].Id);
 
-			return UniTask.CompletedTask;
+			return PersistenceTask.CompletedTask;
 		}
 
-		public UniTask<SaveLayoutResult> ReadAsync(string slot, Allocator allocator, CancellationToken cancellation = default)
+		public SaveLayoutTask ReadAsync(string slot, Allocator allocator, CancellationToken cancellation = default)
 			=> throw new NotSupportedException();
 
-		public UniTask<bool> ExistsAsync(string slot, CancellationToken cancellation = default)
-			=> UniTask.FromResult(false);
+		public BoolTask ExistsAsync(string slot, CancellationToken cancellation = default)
+			=> PersistenceTask.FromResult(false);
 
-		public UniTask DeleteAsync(string slot, CancellationToken cancellation = default)
-			=> UniTask.CompletedTask;
+		public TaskType DeleteAsync(string slot, CancellationToken cancellation = default)
+			=> PersistenceTask.CompletedTask;
 	}
 }

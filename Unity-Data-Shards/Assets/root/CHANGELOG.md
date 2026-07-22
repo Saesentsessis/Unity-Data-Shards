@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-07-23
+
+### Added
+
+- Wrapped all of the `UniTask` calls inside a preprocessor directive with fallback to `System.Threading.Tasks`. `SaveManager.SaveAsync`/`LoadAsync` return `UniTask` or `Task` accordingly. Without UniTask, main-thread affinity is provided by a PlayerLoop-driven dispatcher.
+- Backend-agnostic async pipeline surface support. If `UniTask` is installed, the package auto-detects it (`PERSISTENCE_HAS_UNITASK` added as an asmdef version-define on Runtime/CloudSave/Tests).
+- A section inside [README.md - Async Backend (UniTask optional)](README.md#async-backend-unitask-optional) describing new behavior in more details.
+
+### Removed
+
+- Hard dependency on `com.cysharp.unitask` package from `package.json`. Dropped unused `UniTask` references from Newtonsoft asmdef. Non-destructive.
+
 ## [0.1.0] - 2026-07-17
 
 ### Added
@@ -49,4 +61,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Tests**: round-trips (0–1000 shards, both storage backends), incremental-save dirty accounting, envelope cache reuse/invalidation, background-serialization round-trip, blob migration with type rename, broken/cyclic chain detection, codec truncation fuzzing at every byte offset, whole-file bit-flip checksum sweep, `FileStorage` crash-recovery scenarios.
 - Dependencies: `com.cysharp.unitask` 2.3.3, `com.unity.collections` 2.1.4, `com.unity.burst` 1.8.0; Unity 2022.3+.
 
+[0.2.0]: https://github.com/Saesentsessis/Unity-Data-Shards/compare/0.1.0...0.2.0
 [0.1.0]: https://github.com/Saesentsessis/Unity-Data-Shards/releases/tag/0.1.0

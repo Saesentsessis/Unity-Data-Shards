@@ -2,7 +2,6 @@
 using System;
 using System.Collections;
 using System.Text;
-using Cysharp.Threading.Tasks;
 using NUnit.Framework;
 using Persistence.Core;
 using Persistence.Layout;
@@ -16,7 +15,7 @@ namespace Persistence.Tests
 		private const string Slot = "newtonsoft-slot";
 
 		[UnityTest]
-		public IEnumerator RoundTrip_PreservesShardData() => UniTask.ToCoroutine(async () =>
+		public IEnumerator RoundTrip_PreservesShardData() => AsyncTest.Run(async () =>
 		{
 			var storage = new MemoryStorage();
 			var manager = new SaveManager(new NewtonsoftJsonSerializer(), new SingleFileSaveLayout(storage));

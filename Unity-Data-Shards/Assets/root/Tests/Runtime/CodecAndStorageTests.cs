@@ -2,7 +2,6 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
-using Cysharp.Threading.Tasks;
 using NUnit.Framework;
 using Persistence.Buffers;
 using Persistence.Core;
@@ -10,6 +9,11 @@ using Persistence.Layout;
 using Persistence.Serialization;
 using Unity.Collections;
 using UnityEngine.TestTools;
+#if PERSISTENCE_HAS_UNITASK
+using SampleTask = Cysharp.Threading.Tasks.UniTask<System.ValueTuple<Persistence.Tests.MemoryStorage, Persistence.SaveManager>>;
+#else
+using SampleTask = System.Threading.Tasks.Task<System.ValueTuple<Persistence.Tests.MemoryStorage, Persistence.SaveManager>>;
+#endif
 
 namespace Persistence.Tests
 {
@@ -188,7 +192,7 @@ namespace Persistence.Tests
 	{
 		private const string Slot = "fuzz-slot";
 
-		private static async UniTask<(MemoryStorage storage, SaveManager manager)> SaveSample()
+		private static async SampleTask SaveSample()
 		{
 			var storage = new MemoryStorage();
 			var manager = new SaveManager(new UnityJsonSerializer(), new SingleFileSaveLayout(storage));
@@ -202,7 +206,7 @@ namespace Persistence.Tests
 		}
 
 		[UnityTest]
-		public IEnumerator TruncationAtEveryOffset_ThrowsCorrupted() => UniTask.ToCoroutine(async () =>
+		public IEnumerator TruncationAtEveryOffset_ThrowsCorrupted() => AsyncTest.Run(async () =>
 		{
 			var (storage, manager) = await SaveSample();
 			var intact = storage.Data[Slot];
@@ -222,7 +226,7 @@ namespace Persistence.Tests
 		});
 
 		[UnityTest]
-		public IEnumerator SingleBitFlip_ThrowsCorrupted() => UniTask.ToCoroutine(async () =>
+		public IEnumerator SingleBitFlip_ThrowsCorrupted() => AsyncTest.Run(async () =>
 		{
 			var (storage, manager) = await SaveSample();
 			var intact = storage.Data[Slot];
@@ -266,7 +270,7 @@ namespace Persistence.Tests
 			=> new NativeArray<byte>(values, Allocator.Persistent);
 
 		[UnityTest]
-		public IEnumerator WriteRead_RoundTrips() => UniTask.ToCoroutine(async () =>
+		public IEnumerator WriteRead_RoundTrips() => AsyncTest.Run(async () =>
 		{
 			var data = Bytes(1, 2, 3, 4, 5);
 
@@ -292,7 +296,7 @@ namespace Persistence.Tests
 		});
 
 		[UnityTest]
-		public IEnumerator TryRead_MissingKey_NotFound() => UniTask.ToCoroutine(async () =>
+		public IEnumerator TryRead_MissingKey_NotFound() => AsyncTest.Run(async () =>
 		{
 			var read = await _storage.TryReadAsync("missing", Allocator.Persistent);
 			Assert.IsFalse(read.Found);
@@ -300,7 +304,7 @@ namespace Persistence.Tests
 		});
 
 		[UnityTest]
-		public IEnumerator StaleBak_DoesNotBrickTheSlot() => UniTask.ToCoroutine(async () =>
+		public IEnumerator StaleBak_DoesNotBrickTheSlot() => AsyncTest.Run(async () =>
 		{
 			var first = Bytes(1);
 			try { await _storage.WriteAsync("slot", first); }
@@ -327,7 +331,7 @@ namespace Persistence.Tests
 		});
 
 		[UnityTest]
-		public IEnumerator BakRestore_RecoversAfterLostMainFile() => UniTask.ToCoroutine(async () =>
+		public IEnumerator BakRestore_RecoversAfterLostMainFile() => AsyncTest.Run(async () =>
 		{
 			var data = Bytes(7, 7, 7);
 			try { await _storage.WriteAsync("slot", data); }
@@ -350,7 +354,7 @@ namespace Persistence.Tests
 		});
 
 		[UnityTest]
-		public IEnumerator EndToEnd_SaveManagerOverFileStorage() => UniTask.ToCoroutine(async () =>
+		public IEnumerator EndToEnd_SaveManagerOverFileStorage() => AsyncTest.Run(async () =>
 		{
 			var manager = new SaveManager(new UnityJsonSerializer(), new SingleFileSaveLayout(_storage));
 			var store = new ShardStore();

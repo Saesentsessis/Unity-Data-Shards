@@ -19,6 +19,8 @@ storage backends.
 Two native allocations per save, regardless of shard count. No exact-size buffer
 contracts. No main-thread serialization stalls.
 
+![Logo](resources/images/Logo.png)
+
 ## The Problem & The Solution
 
 Typical Unity save systems serialize one monolithic object graph: every save rewrites
@@ -327,12 +329,21 @@ no extra `Exists` round trip.
 work and always returns to the main thread before invoking layouts/storages — including
 on exception and cancellation paths.
 
+## Async Backend (UniTask optional)
+
+The pipeline's async surface is backend-agnostic. If **[UniTask](https://github.com/Cysharp/UniTask)**
+is installed, the package auto-detects it (asmdef version define `PERSISTENCE_HAS_UNITASK`) and uses
+`UniTask`/`UniTask<T>` for zero-allocation awaits — recommended. If it is **not** installed, the same
+API compiles against `System.Threading.Tasks.Task`, with main-thread affinity provided by a
+PlayerLoop-driven dispatcher (no `SynchronizationContext` dependency). Nothing to configure either
+way; `SaveManager.SaveAsync`/`LoadAsync` return `UniTask` or `Task` accordingly.
+
 ## Requirements
 
 - Unity **2022.3** or newer
-- [`com.cysharp.unitask`](https://github.com/Cysharp/UniTask) **2.3.3** or newer
 - [`com.unity.collections`](https://docs.unity3d.com/Packages/com.unity.collections@latest) **2.1.4** or newer
 - [`com.unity.burst`](https://docs.unity3d.com/Packages/com.unity.burst@latest) **1.8.0** or newer
+- *(optional)* [`com.cysharp.unitask`](https://github.com/Cysharp/UniTask) **2.0.0** or newer — enables the UniTask backend
 
 ## Installation
 
@@ -368,7 +379,7 @@ Or manually add the scoped registry to your `Packages/manifest.json`:
 ### Method 2: Unity package installer
 
 1. Download the latest `.unitypackage` from [GitHub Releases page](https://github.com/Saesentsessis/Unity-Data-Shards/releases).
-   - _Direct Link:_ [Unity-Data-Shards-Installer.unitypackage](https://github.com/Saesentsessis/Unity-Data-Shards/releases/download/0.1.0/Unity-Data-Shards-Installer.unitypackage)
+   - _Direct Link:_ [Unity-Data-Shards-Installer.unitypackage](https://github.com/Saesentsessis/Unity-Data-Shards/releases/download/0.2.0/Unity-Data-Shards-Installer.unitypackage)
 2. Import the downloaded package into your Unity project.
 3. The installer will automatically configure OpenUPM in your `manifest.json` file and install the package dependencies.
 

@@ -2,12 +2,20 @@
 using System;
 using System.Collections.Generic;
 using System.Threading;
-using Cysharp.Threading.Tasks;
 using Persistence.Core;
 using Unity.Collections;
 using Unity.Services.Authentication;
 using Unity.Services.CloudSave;
 using Unity.Services.CloudSave.Models;
+#if PERSISTENCE_HAS_UNITASK
+using TaskType = Cysharp.Threading.Tasks.UniTask;
+using BoolTask = Cysharp.Threading.Tasks.UniTask<bool>;
+using StorageReadTask = Cysharp.Threading.Tasks.UniTask<Persistence.Core.StorageReadResult>;
+#else
+using TaskType = System.Threading.Tasks.Task;
+using BoolTask = System.Threading.Tasks.Task<bool>;
+using StorageReadTask = System.Threading.Tasks.Task<Persistence.Core.StorageReadResult>;
+#endif
 
 namespace Persistence.Storage.CloudSave
 {
@@ -38,7 +46,7 @@ namespace Persistence.Storage.CloudSave
 			_reservedChar = reservedChar;
 		}
 
-		public async UniTask<StorageReadResult> TryReadAsync(string key, Allocator allocator, CancellationToken cancellation = default)
+		public async StorageReadTask TryReadAsync(string key, Allocator allocator, CancellationToken cancellation = default)
 		{
 			cancellation.ThrowIfCancellationRequested();
 			RequireSignedIn();
@@ -57,7 +65,7 @@ namespace Persistence.Storage.CloudSave
 			return new StorageReadResult(new NativeArray<byte>(bytes, allocator));
 		}
 
-		public async UniTask WriteAsync(string key, NativeArray<byte> data, CancellationToken cancellation = default)
+		public async TaskType WriteAsync(string key, NativeArray<byte> data, CancellationToken cancellation = default)
 		{
 			cancellation.ThrowIfCancellationRequested();
 			RequireSignedIn();
@@ -66,7 +74,7 @@ namespace Persistence.Storage.CloudSave
 			await CloudSaveService.Instance.Files.Player.SaveAsync(ResolveKey(key), data.ToArray());
 		}
 
-		public async UniTask<bool> ExistsAsync(string key, CancellationToken cancellation = default)
+		public async BoolTask ExistsAsync(string key, CancellationToken cancellation = default)
 		{
 			cancellation.ThrowIfCancellationRequested();
 			RequireSignedIn();
@@ -82,7 +90,7 @@ namespace Persistence.Storage.CloudSave
 			}
 		}
 
-		public async UniTask DeleteAsync(string key, CancellationToken cancellation = default)
+		public async TaskType DeleteAsync(string key, CancellationToken cancellation = default)
 		{
 			cancellation.ThrowIfCancellationRequested();
 			RequireSignedIn();

@@ -1,6 +1,5 @@
 {
   "dependencies": {
-    "com.cysharp.unitask": "2.5.11",
     "com.github-glitchenzo.nugetforunity": "https://github.com/GlitchEnzo/NuGetForUnity.git?path=/src/NuGetForUnity",
     "com.unity.burst": "1.8.29",
     "com.unity.collections": "2.6.7",
