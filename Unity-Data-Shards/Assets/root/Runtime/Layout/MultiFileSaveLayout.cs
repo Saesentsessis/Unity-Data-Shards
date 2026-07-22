@@ -1,7 +1,15 @@
 using System;
 using System.Buffers.Binary;
 using System.Threading;
-using Cysharp.Threading.Tasks;
+#if PERSISTENCE_HAS_UNITASK
+using TaskType = Cysharp.Threading.Tasks.UniTask;
+using BoolTask = Cysharp.Threading.Tasks.UniTask<bool>;
+using SaveLayoutTask = Cysharp.Threading.Tasks.UniTask<Persistence.Layout.SaveLayoutResult>;
+#else
+using TaskType = System.Threading.Tasks.Task;
+using BoolTask = System.Threading.Tasks.Task<bool>;
+using SaveLayoutTask = System.Threading.Tasks.Task<Persistence.Layout.SaveLayoutResult>;
+#endif
 using Persistence.Buffers;
 using Persistence.Core;
 using Unity.Collections;
@@ -37,7 +45,7 @@ namespace Persistence.Layout
 		// Incremental by design: SaveManager passes only dirty blobs.
 		public bool RequiresFullSnapshot => false;
 
-		public async UniTask WriteAsync(string slot, SaveEnvelope envelope, NativeArray<byte> payload,
+		public async TaskType WriteAsync(string slot, SaveEnvelope envelope, NativeArray<byte> payload,
 			NativeArray<ShardBlobRange> ranges, CancellationToken cancellation = default)
 		{
 			var maxBlobLength = 0;
@@ -69,7 +77,7 @@ namespace Persistence.Layout
 			}
 		}
 
-		public async UniTask<SaveLayoutResult> ReadAsync(string slot, Allocator allocator, CancellationToken cancellation = default)
+		public async SaveLayoutTask ReadAsync(string slot, Allocator allocator, CancellationToken cancellation = default)
 		{
 			var envelopeRead = await _storage.TryReadAsync(slot, Allocator.Persistent, cancellation);
 
@@ -126,10 +134,10 @@ namespace Persistence.Layout
 			}
 		}
 
-		public UniTask<bool> ExistsAsync(string slot, CancellationToken cancellation = default)
+		public BoolTask ExistsAsync(string slot, CancellationToken cancellation = default)
 			=> _storage.ExistsAsync(slot, cancellation);
 
-		public async UniTask DeleteAsync(string slot, CancellationToken cancellation = default)
+		public async TaskType DeleteAsync(string slot, CancellationToken cancellation = default)
 		{
 			var envelopeRead = await _storage.TryReadAsync(slot, Allocator.Persistent, cancellation);
 

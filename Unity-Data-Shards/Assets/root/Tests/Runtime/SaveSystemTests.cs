@@ -1,7 +1,6 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
-using Cysharp.Threading.Tasks;
 using NUnit.Framework;
 using Persistence.Core;
 using Persistence.Layout;
@@ -31,7 +30,7 @@ namespace Persistence.Tests
 		}
 
 		[UnityTest]
-		public IEnumerator RoundTrip_PreservesShardData([Values(0, 1, 10, 80, 1000)] int count) => UniTask.ToCoroutine(async () =>
+		public IEnumerator RoundTrip_PreservesShardData([Values(0, 1, 10, 80, 1000)] int count) => AsyncTest.Run(async () =>
 		{
 			var manager = CreateManager(out _);
 			var store = CreateShards(count);
@@ -52,7 +51,7 @@ namespace Persistence.Tests
 		});
 
 		[UnityTest]
-		public IEnumerator RoundTrip_PlainList_WorksWithoutShardStore() => UniTask.ToCoroutine(async () =>
+		public IEnumerator RoundTrip_PlainList_WorksWithoutShardStore() => AsyncTest.Run(async () =>
 		{
 			var manager = CreateManager(out _);
 			var shards = new List<IDataShard> { new TestShard(Guid.NewGuid(), 42, "answer") };
@@ -65,7 +64,7 @@ namespace Persistence.Tests
 		});
 
 		[UnityTest]
-		public IEnumerator SaveLoad_MissingSlot_ExistsFalse_LoadThrows() => UniTask.ToCoroutine(async () =>
+		public IEnumerator SaveLoad_MissingSlot_ExistsFalse_LoadThrows() => AsyncTest.Run(async () =>
 		{
 			var manager = CreateManager(out _);
 
@@ -79,7 +78,7 @@ namespace Persistence.Tests
 		});
 
 		[UnityTest]
-		public IEnumerator IncrementalSave_SerializesOnlyDirtyShards_AndClearsOnlySnapshot() => UniTask.ToCoroutine(async () =>
+		public IEnumerator IncrementalSave_SerializesOnlyDirtyShards_AndClearsOnlySnapshot() => AsyncTest.Run(async () =>
 		{
 			var serializer = new CountingSerializer();
 			var layout = new CapturingLayout { FullSnapshot = false };
@@ -108,7 +107,7 @@ namespace Persistence.Tests
 		});
 
 		[UnityTest]
-		public IEnumerator EnvelopeCache_ReusedWhileGenerationUnchanged_InvalidatedByAdd() => UniTask.ToCoroutine(async () =>
+		public IEnumerator EnvelopeCache_ReusedWhileGenerationUnchanged_InvalidatedByAdd() => AsyncTest.Run(async () =>
 		{
 			var layout = new CapturingLayout { FullSnapshot = true };
 			var manager = new SaveManager(new CountingSerializer(), layout);
@@ -131,7 +130,7 @@ namespace Persistence.Tests
 		});
 
 		[UnityTest]
-		public IEnumerator BackgroundSerialization_RoundTrips() => UniTask.ToCoroutine(async () =>
+		public IEnumerator BackgroundSerialization_RoundTrips() => AsyncTest.Run(async () =>
 		{
 			var storage = new MemoryStorage();
 			var manager = new SaveManager(new CountingSerializer(background: true), new SingleFileSaveLayout(storage));
@@ -150,7 +149,7 @@ namespace Persistence.Tests
 		});
 
 		[UnityTest]
-		public IEnumerator Migration_BlobLevel_RewritesTypeAndFields() => UniTask.ToCoroutine(async () =>
+		public IEnumerator Migration_BlobLevel_RewritesTypeAndFields() => AsyncTest.Run(async () =>
 		{
 			var migrations = new MigrationRegistry();
 			migrations.Register(new LegacyToModernMigration());
@@ -183,7 +182,7 @@ namespace Persistence.Tests
 		}
 
 		[UnityTest]
-		public IEnumerator Migration_Cycle_ThrowsInsteadOfHanging() => UniTask.ToCoroutine(async () =>
+		public IEnumerator Migration_Cycle_ThrowsInsteadOfHanging() => AsyncTest.Run(async () =>
 		{
 			var migrations = new MigrationRegistry();
 			// Legacy v1 -> Modern v1 -> Legacy v1 -> ... : an accidental cycle.
@@ -201,7 +200,7 @@ namespace Persistence.Tests
 		});
 
 		[UnityTest]
-		public IEnumerator Migration_BrokenChain_Throws() => UniTask.ToCoroutine(async () =>
+		public IEnumerator Migration_BrokenChain_Throws() => AsyncTest.Run(async () =>
 		{
 			var migrations = new MigrationRegistry();
 			// Chain stops at ModernShard v1, but its schema declares v2 -> broken.

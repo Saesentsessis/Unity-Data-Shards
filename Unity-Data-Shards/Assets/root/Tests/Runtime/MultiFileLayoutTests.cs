@@ -1,7 +1,6 @@
 using System;
 using System.Collections;
 using System.Linq;
-using Cysharp.Threading.Tasks;
 using NUnit.Framework;
 using Persistence.Core;
 using Persistence.Layout;
@@ -31,7 +30,7 @@ namespace Persistence.Tests
 		}
 
 		[UnityTest]
-		public IEnumerator RoundTrip_PreservesShardData([Values(0, 1, 10, 80)] int count) => UniTask.ToCoroutine(async () =>
+		public IEnumerator RoundTrip_PreservesShardData([Values(0, 1, 10, 80)] int count) => AsyncTest.Run(async () =>
 		{
 			var manager = CreateManager(out var storage);
 			var store = CreateShards(count);
@@ -53,7 +52,7 @@ namespace Persistence.Tests
 		});
 
 		[UnityTest]
-		public IEnumerator IncrementalSave_RewritesOnlyDirtyFilesAndEnvelope() => UniTask.ToCoroutine(async () =>
+		public IEnumerator IncrementalSave_RewritesOnlyDirtyFilesAndEnvelope() => AsyncTest.Run(async () =>
 		{
 			var manager = CreateManager(out var storage);
 			var store = CreateShards(10);
@@ -72,7 +71,7 @@ namespace Persistence.Tests
 		});
 
 		[UnityTest]
-		public IEnumerator CorruptedShardFile_ThrowsCorrupted() => UniTask.ToCoroutine(async () =>
+		public IEnumerator CorruptedShardFile_ThrowsCorrupted() => AsyncTest.Run(async () =>
 		{
 			var manager = CreateManager(out var storage);
 			await manager.SaveAsync(Slot, CreateShards(3));
@@ -89,7 +88,7 @@ namespace Persistence.Tests
 		});
 
 		[UnityTest]
-		public IEnumerator MissingShardFile_ThrowsCorrupted() => UniTask.ToCoroutine(async () =>
+		public IEnumerator MissingShardFile_ThrowsCorrupted() => AsyncTest.Run(async () =>
 		{
 			var manager = CreateManager(out var storage);
 			await manager.SaveAsync(Slot, CreateShards(3));
@@ -105,7 +104,7 @@ namespace Persistence.Tests
 		});
 
 		[UnityTest]
-		public IEnumerator Delete_RemovesEnvelopeAndAllShardFiles() => UniTask.ToCoroutine(async () =>
+		public IEnumerator Delete_RemovesEnvelopeAndAllShardFiles() => AsyncTest.Run(async () =>
 		{
 			var manager = CreateManager(out var storage);
 			await manager.SaveAsync(Slot, CreateShards(5));

@@ -14,6 +14,12 @@
     "precompiledReferences": [],
     "autoReferenced": true,
     "defineConstraints": [],
-    "versionDefines": [],
+    "versionDefines": [
+        {
+            "name": "com.cysharp.unitask",
+            "expression": "2.0.0",
+            "define": "PERSISTENCE_HAS_UNITASK"
+        }
+    ],
     "noEngineReferences": false
 }

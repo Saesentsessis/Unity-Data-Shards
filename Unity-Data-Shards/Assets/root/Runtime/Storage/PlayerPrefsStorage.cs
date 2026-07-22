@@ -1,11 +1,20 @@
 using System;
 using System.Collections.Generic;
 using System.Threading;
-using Cysharp.Threading.Tasks;
 using Persistence.Core;
+using Persistence.Threading;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using UnityEngine;
+#if PERSISTENCE_HAS_UNITASK
+using TaskType = Cysharp.Threading.Tasks.UniTask;
+using BoolTask = Cysharp.Threading.Tasks.UniTask<bool>;
+using StorageReadTask = Cysharp.Threading.Tasks.UniTask<Persistence.Core.StorageReadResult>;
+#else
+using TaskType = System.Threading.Tasks.Task;
+using BoolTask = System.Threading.Tasks.Task<bool>;
+using StorageReadTask = System.Threading.Tasks.Task<Persistence.Core.StorageReadResult>;
+#endif
 
 namespace Persistence.Storage
 {
@@ -24,12 +33,12 @@ namespace Persistence.Storage
 			_keyCache = _postfix.Length > 0 ? new Dictionary<string, string>() : null;
 		}
 
-		public UniTask<StorageReadResult> TryReadAsync(string key, Allocator allocator, CancellationToken cancellation = default)
+		public StorageReadTask TryReadAsync(string key, Allocator allocator, CancellationToken cancellation = default)
 		{
 			var base64 = PlayerPrefs.GetString(ResolveKey(key));
 
 			if (string.IsNullOrEmpty(base64))
-				return UniTask.FromResult(StorageReadResult.NotFound);
+				return PersistenceTask.FromResult(StorageReadResult.NotFound);
 
 			unsafe
 			{
@@ -48,11 +57,11 @@ namespace Persistence.Storage
 					throw new InvalidOperationException($"[PlayerPrefsStorage] Corrupted base64 payload for key '{key}'.");
 				}
 
-				return UniTask.FromResult(new StorageReadResult(result));
+				return PersistenceTask.FromResult(new StorageReadResult(result));
 			}
 		}
 
-		public UniTask WriteAsync(string key, NativeArray<byte> data, CancellationToken cancellation = default)
+		public TaskType WriteAsync(string key, NativeArray<byte> data, CancellationToken cancellation = default)
 		{
 			string base64;
 
@@ -70,18 +79,18 @@ namespace Persistence.Storage
 			}
 
 			PlayerPrefs.SetString(ResolveKey(key), base64);
-			return UniTask.CompletedTask;
+			return PersistenceTask.CompletedTask;
 		}
 
-		public UniTask<bool> ExistsAsync(string key, CancellationToken cancellation = default)
+		public BoolTask ExistsAsync(string key, CancellationToken cancellation = default)
 		{
-			return UniTask.FromResult(PlayerPrefs.HasKey(ResolveKey(key)));
+			return PersistenceTask.FromResult(PlayerPrefs.HasKey(ResolveKey(key)));
 		}
 
-		public UniTask DeleteAsync(string key, CancellationToken cancellation = default)
+		public TaskType DeleteAsync(string key, CancellationToken cancellation = default)
 		{
 			PlayerPrefs.DeleteKey(ResolveKey(key));
-			return UniTask.CompletedTask;
+			return PersistenceTask.CompletedTask;
 		}
 
 		private string ResolveKey(string key)

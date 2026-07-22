@@ -1,4 +1,4 @@
-#!/usr/bin/env pwsh
+﻿#!/usr/bin/env pwsh
 <#
 .SYNOPSIS
     Automated version bumping script for Unity Package project
@@ -153,7 +153,7 @@ function Update-VersionFiles {
     if ($PreviewOnly) {
         Write-ColorText "`n📋 Preview Summary:" "Cyan"
         Write-ColorText "Files to be modified: $($changes.Count)" "White"
-        Write-ColorText "Total replacements: $(($changes | Measure-Object -Property Matches -Sum).Sum)" "White"
+        Write-ColorText "Total replacements: $(($changes.Matches | Measure-Object -Sum).Sum)" "White"
         return $null
     }
 
@@ -204,7 +204,7 @@ try {
     if ($changes -and $changes.Count -gt 0) {
         Write-ColorText "`n🎉 Version bump completed successfully!" "Green"
         Write-ColorText "   Updated $($changes.Count) files" "White"
-        Write-ColorText "   Total replacements: $(($changes | Measure-Object -Property Matches -Sum).Sum)" "White"
+        Write-ColorText "   Total replacements: $(($changes.Matches | Measure-Object -Sum).Sum)" "White"
         Write-ColorText "   Version: $currentVersion → $NewVersion" "White"
         Write-ColorText "`n💡 Remember to commit these changes to git" "Cyan"
     }

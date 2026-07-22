@@ -3,7 +3,6 @@
     "rootNamespace": "",
     "references": [
         "Saesentsessis.Persistence.Runtime",
-        "UniTask",
         "Unity.Collections",
         "Newtonsoft.Json"
     ],

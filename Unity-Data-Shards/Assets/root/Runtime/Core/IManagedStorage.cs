@@ -1,6 +1,14 @@
 using System;
 using System.Threading;
-using Cysharp.Threading.Tasks;
+#if PERSISTENCE_HAS_UNITASK
+using TaskType = Cysharp.Threading.Tasks.UniTask;
+using BoolTask = Cysharp.Threading.Tasks.UniTask<bool>;
+using ManagedStorageReadTask = Cysharp.Threading.Tasks.UniTask<Persistence.Core.ManagedStorageReadResult>;
+#else
+using TaskType = System.Threading.Tasks.Task;
+using BoolTask = System.Threading.Tasks.Task<bool>;
+using ManagedStorageReadTask = System.Threading.Tasks.Task<Persistence.Core.ManagedStorageReadResult>;
+#endif
 
 namespace Persistence.Core
 {
@@ -14,7 +22,7 @@ namespace Persistence.Core
 		/// Reads raw bytes for the key. Returns <c>Found == false</c> when the key has
 		/// no persisted data.
 		/// </summary>
-		UniTask<ManagedStorageReadResult> TryReadAsync(string key, CancellationToken cancellation = default);
+		ManagedStorageReadTask TryReadAsync(string key, CancellationToken cancellation = default);
 
 		/// <summary>Persists raw bytes under the key.</summary>
 		/// <remarks>
@@ -22,12 +30,12 @@ namespace Persistence.Core
 		/// caller guarantees the buffer stays valid and unmodified until the returned
 		/// task completes.
 		/// </remarks>
-		UniTask WriteAsync(string key, ReadOnlyMemory<byte> data, CancellationToken cancellation = default);
+		TaskType WriteAsync(string key, ReadOnlyMemory<byte> data, CancellationToken cancellation = default);
 
 		/// <summary>Returns true if the key has persisted data.</summary>
-		UniTask<bool> ExistsAsync(string key, CancellationToken cancellation = default);
+		BoolTask ExistsAsync(string key, CancellationToken cancellation = default);
 
 		/// <summary>Removes persisted data for the key. No-op if key does not exist.</summary>
-		UniTask DeleteAsync(string key, CancellationToken cancellation = default);
+		TaskType DeleteAsync(string key, CancellationToken cancellation = default);
 	}
 }

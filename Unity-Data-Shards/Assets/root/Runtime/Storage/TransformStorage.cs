@@ -1,9 +1,17 @@
 using System;
 using System.Threading;
-using Cysharp.Threading.Tasks;
 using Persistence.Buffers;
 using Persistence.Core;
 using Unity.Collections;
+#if PERSISTENCE_HAS_UNITASK
+using TaskType = Cysharp.Threading.Tasks.UniTask;
+using BoolTask = Cysharp.Threading.Tasks.UniTask<bool>;
+using StorageReadTask = Cysharp.Threading.Tasks.UniTask<Persistence.Core.StorageReadResult>;
+#else
+using TaskType = System.Threading.Tasks.Task;
+using BoolTask = System.Threading.Tasks.Task<bool>;
+using StorageReadTask = System.Threading.Tasks.Task<Persistence.Core.StorageReadResult>;
+#endif
 
 namespace Persistence.Storage
 {
@@ -32,7 +40,7 @@ namespace Persistence.Storage
 			_transforms = transforms ?? Array.Empty<ISaveTransform>();
 		}
 
-		public async UniTask<StorageReadResult> TryReadAsync(string key, Allocator allocator, CancellationToken cancellation = default)
+		public async StorageReadTask TryReadAsync(string key, Allocator allocator, CancellationToken cancellation = default)
 		{
 			if (_transforms.Length == 0)
 				return await _inner.TryReadAsync(key, allocator, cancellation);
@@ -52,7 +60,7 @@ namespace Persistence.Storage
 			}
 		}
 
-		public async UniTask WriteAsync(string key, NativeArray<byte> data, CancellationToken cancellation = default)
+		public async TaskType WriteAsync(string key, NativeArray<byte> data, CancellationToken cancellation = default)
 		{
 			if (_transforms.Length == 0)
 			{
@@ -66,10 +74,10 @@ namespace Persistence.Storage
 			await _inner.WriteAsync(key, transformed, cancellation);
 		}
 
-		public UniTask<bool> ExistsAsync(string key, CancellationToken cancellation = default)
+		public BoolTask ExistsAsync(string key, CancellationToken cancellation = default)
 			=> _inner.ExistsAsync(key, cancellation);
 
-		public UniTask DeleteAsync(string key, CancellationToken cancellation = default)
+		public TaskType DeleteAsync(string key, CancellationToken cancellation = default)
 			=> _inner.DeleteAsync(key, cancellation);
 
 		public void Dispose()

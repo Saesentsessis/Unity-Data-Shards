@@ -2,12 +2,23 @@ using System;
 using System.Buffers;
 using System.Collections.Generic;
 using System.Threading;
-using Cysharp.Threading.Tasks;
 using Persistence.Buffers;
 using Persistence.Core;
 using Persistence.Layout;
+using Persistence.Threading;
 using Unity.Collections;
 using UnityEngine.Pool;
+#if PERSISTENCE_HAS_UNITASK
+using TaskType = Cysharp.Threading.Tasks.UniTask;
+using BoolTask = Cysharp.Threading.Tasks.UniTask<bool>;
+using LoadResultTask = Cysharp.Threading.Tasks.UniTask<System.Collections.Generic.IReadOnlyList<Persistence.Core.IDataShard>>;
+using ShardArrayTask = Cysharp.Threading.Tasks.UniTask<Persistence.Core.IDataShard[]>;
+#else
+using TaskType = System.Threading.Tasks.Task;
+using BoolTask = System.Threading.Tasks.Task<bool>;
+using LoadResultTask = System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Persistence.Core.IDataShard>>;
+using ShardArrayTask = System.Threading.Tasks.Task<Persistence.Core.IDataShard[]>;
+#endif
 
 namespace Persistence
 {
@@ -47,7 +58,7 @@ namespace Persistence
 		/// a thread-pool thread, so a mid-save mutation is a data race, and its dirty flag
 		/// would be lost by the post-save <see cref="IDataShard.ClearDirty"/> pass.
 		/// </remarks>
-		public async UniTask SaveAsync(string slot, IReadOnlyList<IDataShard> shards, CancellationToken cancellation = default)
+		public async TaskType SaveAsync(string slot, IReadOnlyList<IDataShard> shards, CancellationToken cancellation = default)
 		{
 			var count = shards.Count;
 			var fullSnapshot = _pipeline.RequiresFullSnapshot;
@@ -91,7 +102,7 @@ namespace Persistence
 			}
 		}
 
-		public async UniTask<IReadOnlyList<IDataShard>> LoadAsync(string slot, CancellationToken cancellation = default)
+		public async LoadResultTask LoadAsync(string slot, CancellationToken cancellation = default)
 		{
 			var shards = await _pipeline.LoadAsync(slot, _migrations, cancellation);
 
@@ -101,12 +112,12 @@ namespace Persistence
 			return shards;
 		}
 
-		public UniTask<bool> ExistsAsync(string slot, CancellationToken cancellation = default)
+		public BoolTask ExistsAsync(string slot, CancellationToken cancellation = default)
 		{
 			return _pipeline.ExistsAsync(slot, cancellation);
 		}
 
-		public UniTask DeleteAsync(string slot, CancellationToken cancellation = default)
+		public TaskType DeleteAsync(string slot, CancellationToken cancellation = default)
 		{
 			// The slot's persisted state is gone; drop its cached envelope with it.
 			if (_envelopeCache.Remove(slot, out var stale))
@@ -337,10 +348,10 @@ namespace Persistence
 		private interface IPipeline
 		{
 			bool RequiresFullSnapshot { get; }
-			UniTask SaveAsync(string slot, SaveEnvelope envelope, IReadOnlyList<IDataShard> shards, NativeBitArray snapshot, int blobCount, CancellationToken cancellation);
-			UniTask<IDataShard[]> LoadAsync(string slot, MigrationRegistry migrations, CancellationToken cancellation);
-			UniTask<bool> ExistsAsync(string slot, CancellationToken cancellation);
-			UniTask DeleteAsync(string slot, CancellationToken cancellation);
+			TaskType SaveAsync(string slot, SaveEnvelope envelope, IReadOnlyList<IDataShard> shards, NativeBitArray snapshot, int blobCount, CancellationToken cancellation);
+			ShardArrayTask LoadAsync(string slot, MigrationRegistry migrations, CancellationToken cancellation);
+			BoolTask ExistsAsync(string slot, CancellationToken cancellation);
+			TaskType DeleteAsync(string slot, CancellationToken cancellation);
 		}
 
 		private sealed class UnmanagedPipeline : IPipeline
@@ -361,7 +372,7 @@ namespace Persistence
 
 			public bool RequiresFullSnapshot => _layout.RequiresFullSnapshot;
 
-			public async UniTask SaveAsync(string slot, SaveEnvelope envelope, IReadOnlyList<IDataShard> shards, NativeBitArray snapshot, int blobCount, CancellationToken cancellation)
+			public async TaskType SaveAsync(string slot, SaveEnvelope envelope, IReadOnlyList<IDataShard> shards, NativeBitArray snapshot, int blobCount, CancellationToken cancellation)
 			{
 				var background = _serializer.SupportsBackgroundSerialization;
 				var capacity = ArenaCapacity(slot, blobCount);
@@ -373,13 +384,13 @@ namespace Persistence
 				try
 				{
 					if (background)
-						await UniTask.SwitchToThreadPool();
+						await PersistenceTask.SwitchToThreadPool();
 
 					Serialize(_serializer, shards, snapshot, arena, ranges, cancellation);
 
 					// Layouts/storages may touch Unity APIs — hand off from the main thread.
 					if (background)
-						await UniTask.SwitchToMainThread(cancellation);
+						await PersistenceTask.SwitchToMainThread(cancellation);
 
 					_arenaSizeHints[slot] = arena.WrittenLength;
 
@@ -390,15 +401,15 @@ namespace Persistence
 					// Exception-safe affinity restore: the caller must never resume on a
 					// pool thread, whatever the failure path was. No cancellation token —
 					// the restore has to run even when the save was cancelled.
-					if (background && !PlayerLoopHelper.IsMainThread)
-						await UniTask.SwitchToMainThread();
+					if (background && !PersistenceTask.IsMainThread)
+						await PersistenceTask.SwitchToMainThread();
 
 					arena.Dispose();
 					ranges.Dispose();
 				}
 			}
 
-			public async UniTask<IDataShard[]> LoadAsync(string slot, MigrationRegistry migrations, CancellationToken cancellation)
+			public async ShardArrayTask LoadAsync(string slot, MigrationRegistry migrations, CancellationToken cancellation)
 			{
 				var result = await _layout.ReadAsync(slot, Allocator.Persistent, cancellation);
 
@@ -410,14 +421,14 @@ namespace Persistence
 					try
 					{
 						if (background)
-							await UniTask.SwitchToThreadPool();
+							await PersistenceTask.SwitchToThreadPool();
 
 						return Deserialize(_serializer, migrations, result, types, currentVersions, needsMigration, cancellation);
 					}
 					finally
 					{
-						if (background && !PlayerLoopHelper.IsMainThread)
-							await UniTask.SwitchToMainThread();
+						if (background && !PersistenceTask.IsMainThread)
+							await PersistenceTask.SwitchToMainThread();
 
 						ReleaseResolved(types, currentVersions, needsMigration);
 					}
@@ -428,12 +439,12 @@ namespace Persistence
 				}
 			}
 
-			public UniTask<bool> ExistsAsync(string slot, CancellationToken cancellation)
+			public BoolTask ExistsAsync(string slot, CancellationToken cancellation)
 			{
 				return _layout.ExistsAsync(slot, cancellation);
 			}
 
-			public UniTask DeleteAsync(string slot, CancellationToken cancellation)
+			public TaskType DeleteAsync(string slot, CancellationToken cancellation)
 			{
 				_arenaSizeHints.Remove(slot);
 				return _layout.DeleteAsync(slot, cancellation);
@@ -476,7 +487,7 @@ namespace Persistence
 
 			public bool RequiresFullSnapshot => _layout.RequiresFullSnapshot;
 
-			public async UniTask SaveAsync(string slot, SaveEnvelope envelope, IReadOnlyList<IDataShard> shards, NativeBitArray snapshot, int blobCount, CancellationToken cancellation)
+			public async TaskType SaveAsync(string slot, SaveEnvelope envelope, IReadOnlyList<IDataShard> shards, NativeBitArray snapshot, int blobCount, CancellationToken cancellation)
 			{
 				var background = _serializer.SupportsBackgroundSerialization;
 				var capacity = ArenaCapacity(slot, blobCount);
@@ -487,12 +498,12 @@ namespace Persistence
 				try
 				{
 					if (background)
-						await UniTask.SwitchToThreadPool();
+						await PersistenceTask.SwitchToThreadPool();
 
 					Serialize(_serializer, shards, snapshot, arena, ranges, blobCount, cancellation);
 
 					if (background)
-						await UniTask.SwitchToMainThread(cancellation);
+						await PersistenceTask.SwitchToMainThread(cancellation);
 
 					_arenaSizeHints[slot] = arena.WrittenLength;
 
@@ -501,15 +512,15 @@ namespace Persistence
 				}
 				finally
 				{
-					if (background && !PlayerLoopHelper.IsMainThread)
-						await UniTask.SwitchToMainThread();
+					if (background && !PersistenceTask.IsMainThread)
+						await PersistenceTask.SwitchToMainThread();
 
 					arena.Dispose();
 					ArrayPool<ShardBlobRange>.Shared.Return(ranges);
 				}
 			}
 
-			public async UniTask<IDataShard[]> LoadAsync(string slot, MigrationRegistry migrations, CancellationToken cancellation)
+			public async ShardArrayTask LoadAsync(string slot, MigrationRegistry migrations, CancellationToken cancellation)
 			{
 				var result = await _layout.ReadAsync(slot, cancellation);
 
@@ -521,14 +532,14 @@ namespace Persistence
 					try
 					{
 						if (background)
-							await UniTask.SwitchToThreadPool();
+							await PersistenceTask.SwitchToThreadPool();
 
 						return Deserialize(_serializer, migrations, result, types, currentVersions, needsMigration, cancellation);
 					}
 					finally
 					{
-						if (background && !PlayerLoopHelper.IsMainThread)
-							await UniTask.SwitchToMainThread();
+						if (background && !PersistenceTask.IsMainThread)
+							await PersistenceTask.SwitchToMainThread();
 
 						ReleaseResolved(types, currentVersions, needsMigration);
 					}
@@ -539,12 +550,12 @@ namespace Persistence
 				}
 			}
 
-			public UniTask<bool> ExistsAsync(string slot, CancellationToken cancellation)
+			public BoolTask ExistsAsync(string slot, CancellationToken cancellation)
 			{
 				return _layout.ExistsAsync(slot, cancellation);
 			}
 
-			public UniTask DeleteAsync(string slot, CancellationToken cancellation)
+			public TaskType DeleteAsync(string slot, CancellationToken cancellation)
 			{
 				_arenaSizeHints.Remove(slot);
 				return _layout.DeleteAsync(slot, cancellation);

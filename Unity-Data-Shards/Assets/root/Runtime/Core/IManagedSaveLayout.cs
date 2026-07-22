@@ -1,7 +1,15 @@
 using System;
 using System.Threading;
-using Cysharp.Threading.Tasks;
 using Persistence.Layout;
+#if PERSISTENCE_HAS_UNITASK
+using TaskType = Cysharp.Threading.Tasks.UniTask;
+using BoolTask = Cysharp.Threading.Tasks.UniTask<bool>;
+using ManagedSaveLayoutTask = Cysharp.Threading.Tasks.UniTask<Persistence.Layout.ManagedSaveLayoutResult>;
+#else
+using TaskType = System.Threading.Tasks.Task;
+using BoolTask = System.Threading.Tasks.Task<bool>;
+using ManagedSaveLayoutTask = System.Threading.Tasks.Task<Persistence.Layout.ManagedSaveLayoutResult>;
+#endif
 
 namespace Persistence.Core
 {
@@ -21,16 +29,16 @@ namespace Persistence.Core
 		/// Writes the envelope and shard payload to storage. Does not take ownership
 		/// of the buffers; they stay valid until the returned task completes.
 		/// </summary>
-		UniTask WriteAsync(string slot, SaveEnvelope envelope, ReadOnlyMemory<byte> payload,
+		TaskType WriteAsync(string slot, SaveEnvelope envelope, ReadOnlyMemory<byte> payload,
 			ReadOnlyMemory<ShardBlobRange> ranges, CancellationToken cancellation = default);
 
 		/// <summary>Reads and returns the envelope, payload and blob ranges. Caller owns (and must Dispose) the result.</summary>
-		UniTask<ManagedSaveLayoutResult> ReadAsync(string slot, CancellationToken cancellation = default);
+		ManagedSaveLayoutTask ReadAsync(string slot, CancellationToken cancellation = default);
 
 		/// <summary>Returns true if a save exists for the given slot.</summary>
-		UniTask<bool> ExistsAsync(string slot, CancellationToken cancellation = default);
+		BoolTask ExistsAsync(string slot, CancellationToken cancellation = default);
 
 		/// <summary>Removes all persisted data for the slot.</summary>
-		UniTask DeleteAsync(string slot, CancellationToken cancellation = default);
+		TaskType DeleteAsync(string slot, CancellationToken cancellation = default);
 	}
 }

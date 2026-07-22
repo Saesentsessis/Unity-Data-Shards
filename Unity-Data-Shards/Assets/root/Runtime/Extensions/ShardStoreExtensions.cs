@@ -1,7 +1,11 @@
 using System.Collections.Generic;
 using System.Threading;
-using Cysharp.Threading.Tasks;
 using Persistence.Core;
+#if PERSISTENCE_HAS_UNITASK
+using ShardStoreTask = Cysharp.Threading.Tasks.UniTask<Persistence.ShardStore>;
+#else
+using ShardStoreTask = System.Threading.Tasks.Task<Persistence.ShardStore>;
+#endif
 
 namespace Persistence
 {
@@ -19,7 +23,7 @@ namespace Persistence
 		/// Loads a slot and returns the shards as a queryable <see cref="ShardStore"/>
 		/// instead of a bare list. Convenience over <c>LoadAsync(...).AsShardStore()</c>.
 		/// </summary>
-		public static async UniTask<ShardStore> LoadAsStoreAsync(this SaveManager manager, string slot, CancellationToken cancellation = default)
+		public static async ShardStoreTask LoadAsStoreAsync(this SaveManager manager, string slot, CancellationToken cancellation = default)
 			=> (await manager.LoadAsync(slot, cancellation)).AsShardStore();
 	}
 }

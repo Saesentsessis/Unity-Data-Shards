@@ -2,12 +2,23 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
-using Cysharp.Threading.Tasks;
 using Persistence.Core;
+using Persistence.Threading;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using Unity.IO.LowLevel.Unsafe;
 using UnityEngine;
+#if PERSISTENCE_HAS_UNITASK
+using TaskType = Cysharp.Threading.Tasks.UniTask;
+using BoolTask = Cysharp.Threading.Tasks.UniTask<bool>;
+using StorageReadTask = Cysharp.Threading.Tasks.UniTask<Persistence.Core.StorageReadResult>;
+using ReadStatusTask = Cysharp.Threading.Tasks.UniTask<Unity.IO.LowLevel.Unsafe.ReadStatus>;
+#else
+using TaskType = System.Threading.Tasks.Task;
+using BoolTask = System.Threading.Tasks.Task<bool>;
+using StorageReadTask = System.Threading.Tasks.Task<Persistence.Core.StorageReadResult>;
+using ReadStatusTask = System.Threading.Tasks.Task<Unity.IO.LowLevel.Unsafe.ReadStatus>;
+#endif
 
 namespace Persistence.Storage
 {
@@ -31,12 +42,12 @@ namespace Persistence.Storage
             _rootDirectory = rootDirectory ?? Application.persistentDataPath;
         }
 
-        public async UniTask<StorageReadResult> TryReadAsync(string key, Allocator allocator, CancellationToken cancellation = default)
+        public async StorageReadTask TryReadAsync(string key, Allocator allocator, CancellationToken cancellation = default)
         {
             var path = ResolvePath(key);
 
             // .bak restore + stat touch the filesystem — keep them off the caller thread.
-            var length = await UniTask.RunOnThreadPool(static state => PrepareRead((string)state), path, cancellationToken: cancellation);
+            var length = await PersistenceTask.RunOnThreadPool(static state => PrepareRead((string)state), path, cancellation);
 
             if (length < 0)
                 return StorageReadResult.NotFound;
@@ -79,7 +90,7 @@ namespace Persistence.Storage
             return new StorageReadResult(result);
         }
 
-        public unsafe UniTask WriteAsync(string key, NativeArray<byte> data, CancellationToken cancellation = default)
+        public unsafe TaskType WriteAsync(string key, NativeArray<byte> data, CancellationToken cancellation = default)
         {
             var path = ResolvePath(key);
 
@@ -88,20 +99,20 @@ namespace Persistence.Storage
             // length cross the thread hop — no defensive TempJob duplicate.
             var state = (path, (IntPtr)data.GetUnsafeReadOnlyPtr(), data.Length);
 
-            return UniTask.RunOnThreadPool(static boxed =>
+            return PersistenceTask.RunOnThreadPool(static boxed =>
             {
-                var (p, ptr, length) = ((string, IntPtr, int))boxed;
+                var (p, ptr, length) = boxed;
                 WriteSync(p, ptr, length);
-            }, state, cancellationToken: cancellation);
+            }, state, cancellation);
         }
 
-        public UniTask<bool> ExistsAsync(string key, CancellationToken cancellation = default)
+        public BoolTask ExistsAsync(string key, CancellationToken cancellation = default)
         {
             var path = ResolvePath(key);
-            return UniTask.FromResult(File.Exists(path) || File.Exists(path + ".bak"));
+            return PersistenceTask.FromResult(File.Exists(path) || File.Exists(path + ".bak"));
         }
 
-        public UniTask DeleteAsync(string key, CancellationToken cancellation = default)
+        public TaskType DeleteAsync(string key, CancellationToken cancellation = default)
         {
             var path = ResolvePath(key);
 
@@ -110,15 +121,15 @@ namespace Persistence.Storage
             File.Delete(path + ".bak");
             File.Delete(path + ".tmp");
 
-            return UniTask.CompletedTask;
+            return PersistenceTask.CompletedTask;
         }
 
-        private static async UniTask<ReadStatus> AwaitCompletion(ReadHandle handle)
+        private static async ReadStatusTask AwaitCompletion(ReadHandle handle)
         {
             ReadStatus status;
 
             while ((status = handle.Status) == ReadStatus.InProgress)
-                await UniTask.Yield();
+                await PersistenceTask.Yield();
 
             return status;
         }

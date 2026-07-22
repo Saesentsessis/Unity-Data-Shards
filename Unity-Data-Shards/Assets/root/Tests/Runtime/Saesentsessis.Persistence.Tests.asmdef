@@ -25,6 +25,11 @@
             "name": "com.unity.nuget.newtonsoft-json",
             "expression": "2.0.0",
             "define": "PERSISTENCE_HAS_NEWTONSOFT"
+        },
+        {
+            "name": "com.cysharp.unitask",
+            "expression": "2.0.0",
+            "define": "PERSISTENCE_HAS_UNITASK"
         }
     ],
     "noEngineReferences": false

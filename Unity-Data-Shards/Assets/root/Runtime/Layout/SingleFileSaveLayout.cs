@@ -1,7 +1,15 @@
 using System;
 using System.Buffers.Binary;
 using System.Threading;
-using Cysharp.Threading.Tasks;
+#if PERSISTENCE_HAS_UNITASK
+using TaskType = Cysharp.Threading.Tasks.UniTask;
+using BoolTask = Cysharp.Threading.Tasks.UniTask<bool>;
+using SaveLayoutTask = Cysharp.Threading.Tasks.UniTask<Persistence.Layout.SaveLayoutResult>;
+#else
+using TaskType = System.Threading.Tasks.Task;
+using BoolTask = System.Threading.Tasks.Task<bool>;
+using SaveLayoutTask = System.Threading.Tasks.Task<Persistence.Layout.SaveLayoutResult>;
+#endif
 using Persistence.Buffers;
 using Persistence.Core;
 using Unity.Collections;
@@ -30,7 +38,7 @@ namespace Persistence.Layout
 		// Single-file packing rewrites the whole payload, so every shard is needed.
 		public bool RequiresFullSnapshot => true;
 
-		public async UniTask WriteAsync(string slot, SaveEnvelope envelope, NativeArray<byte> payload,
+		public async TaskType WriteAsync(string slot, SaveEnvelope envelope, NativeArray<byte> payload,
 			NativeArray<ShardBlobRange> ranges, CancellationToken cancellation = default)
 		{
 			// Envelope strings are small; payload dominates — size the arena accordingly.
@@ -47,7 +55,7 @@ namespace Persistence.Layout
 			}
 		}
 
-		public async UniTask<SaveLayoutResult> ReadAsync(string slot, Allocator allocator, CancellationToken cancellation = default)
+		public async SaveLayoutTask ReadAsync(string slot, Allocator allocator, CancellationToken cancellation = default)
 		{
 			var read = await _storage.TryReadAsync(slot, Allocator.Persistent, cancellation);
 
@@ -64,10 +72,10 @@ namespace Persistence.Layout
 			}
 		}
 
-		public UniTask<bool> ExistsAsync(string slot, CancellationToken cancellation = default)
+		public BoolTask ExistsAsync(string slot, CancellationToken cancellation = default)
 			=> _storage.ExistsAsync(slot, cancellation);
 
-		public UniTask DeleteAsync(string slot, CancellationToken cancellation = default)
+		public TaskType DeleteAsync(string slot, CancellationToken cancellation = default)
 			=> _storage.DeleteAsync(slot, cancellation);
 
 		private static void Pack(in SaveEnvelope envelope, NativeArray<byte> payload,

@@ -23,6 +23,11 @@
             "name": "com.unity.services.cloudsave",
             "expression": "2.0.0",
             "define": "PERSISTENCE_HAS_CLOUDSAVE"
+        },
+        {
+            "name": "com.cysharp.unitask",
+            "expression": "2.0.0",
+            "define": "PERSISTENCE_HAS_UNITASK"
         }
     ],
     "noEngineReferences": false
