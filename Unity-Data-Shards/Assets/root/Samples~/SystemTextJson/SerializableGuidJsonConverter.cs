@@ -1,9 +1,9 @@
 using System;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Persistence.Core;
+using Saesentsessis.Persistence.Core;
 
-namespace Persistence.Serialization.SystemTextJson
+namespace Saesentsessis.Persistence.Serialization.SystemTextJson
 {
 	/// <summary>
 	/// Reads/writes <see cref="SerializableGuid"/> as its 32-char "N" hex string with no heap

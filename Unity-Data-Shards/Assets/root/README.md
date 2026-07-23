@@ -95,7 +95,7 @@ Define a shard — a plain class with a stable identity and (optionally) dirty t
 
 ```csharp
 using System;
-using Persistence.Core;
+using Saesentsessis.Persistence.Core;
 using UnityEngine;
 
 [Serializable]
@@ -120,10 +120,10 @@ public class PlayerShard : IDataShard
 Wire up a pipeline and save:
 
 ```csharp
-using Persistence;
-using Persistence.Layout;
-using Persistence.Serialization;
-using Persistence.Storage;
+using Saesentsessis.Persistence;
+using Saesentsessis.Persistence.Layout;
+using Saesentsessis.Persistence.Serialization;
+using Saesentsessis.Persistence.Storage;
 
 var storage = new FileStorage();                    // Application.persistentDataPath
 var layout  = new SingleFileSaveLayout(storage);    // one checksummed file per slot
@@ -194,6 +194,99 @@ var manager = new SaveManager(serializer, layout, migrations);
 
 The registry chains steps until the version declared by `[ShardSchema]` is reached,
 validates broken or cyclic chains, and runs each step through pooled ping-pong buffers.
+
+#### Typed migrations
+
+Reshaping raw bytes is the expert path. When you would rather write a migration in plain
+C#, derive from `TypedShardMigration<TOld, TNew>` and implement a single `Convert`. The base
+class deserializes the old shape, hands it to you, and reserializes the result — so a typed
+step is still just an `IShardMigration` in the same chain, with no wire-format knowledge
+required. `TOld` may be a plain versioned snapshot class kept only for migration.
+
+```csharp
+public sealed class PlayerV1ToV2 : TypedShardMigration<PlayerShardV1, PlayerShard>
+{
+    public PlayerV1ToV2() : base(fromVersion: 1, toVersion: 2) { }
+
+    protected override PlayerShard Convert(PlayerShardV1 old)
+        => new PlayerShard(old.Identifier, points: old.Value);
+}
+
+migrations.Register(new PlayerV1ToV2());
+```
+
+The active serializer is supplied automatically when the registry reaches a `SaveManager`
+(the migration calling `Migrate` without one throws). Override `FromTypeName` if the stored
+name differs from `TOld`'s current name.
+
+### Building a SaveManager
+
+`SaveManagerBuilder` (with `MigrationRegistryBuilder`) is a fluent alternative to the
+constructors — it accepts either a ready `MigrationRegistry` or a builder, and picks the
+matching `ISaveLayout` / `IManagedSaveLayout` overload:
+
+```csharp
+var manager = new SaveManagerBuilder()
+    .WithSerializer(new UnityJsonSerializer())
+    .WithLayout(new SingleFileSaveLayout(new FileStorage()))
+    .WithMigrations(new MigrationRegistryBuilder()
+        .Add(new PlayerV1ToV2()))
+    .Build();
+```
+
+### Importing Existing (Non-Shard) Saves
+
+Schema migrations only apply to data that already has a save envelope. Adopting a save written
+*before* this package — a plain `PlayerData` blob, a PlayerPrefs string, an ad-hoc JSON file —
+goes through a separate one-shot import pipeline that runs **before** the load path and commits
+a single normal save. Afterwards the slot loads like any other.
+
+You load the legacy data yourself; the package never parses a foreign format:
+
+```csharp
+public sealed class InventoryImporter : IShardImporter<LegacySave>
+{
+    // false if the mapping touches UnityEngine.Object state.
+    public bool SupportsBackgroundImport => true;
+
+    public void Import(LegacySave legacy, ICollection<IDataShard> sink)
+    {
+        sink.Add(new InventoryShard(
+            SerializableGuidExtensions.Compute("player/inventory"), legacy.Items));
+    }
+}
+
+var legacy = JsonUtility.FromJson<LegacySave>(File.ReadAllText(oldPath)); // your call, your format
+
+var result = await new ShardImportPipelineBuilder(manager)
+    .AddImporter(new InventoryImporter())   // importers and data are registered separately
+    .AddImporter(new StatsImporter())       // several importers may share one legacy type
+    .AddData(legacy)
+    .AddDataRange(legacyEnemies)            // many payloads of one type share a single step
+    .Build()                                // pairs them by type; throws if a payload has none
+    .RunAsync("slot0");
+
+if (result.Status == ImportStatus.SkippedExistingSave)
+    store = await manager.LoadAsStoreAsync("slot0"); // already adopted on an earlier run
+else
+    store = result.Store;                            // fresh import, ready to use
+```
+
+- **Run-once by default.** If the slot already holds a save the run is a no-op
+  (`SkippedExistingSave`), so this is safe to call on every startup. Set
+  `ImportOptions.Overwrite = true` to deliberately re-import.
+- **Your old save is never touched.** The pipeline does not read, move or delete the legacy
+  source — only you do, once you are satisfied the import worked.
+- **Parallel by default.** Importers reporting `SupportsBackgroundImport` are all scheduled onto
+  the thread pool first, then the main-thread importers run *concurrently with them*; both groups
+  are joined before the save.
+- **Batched by type.** All payloads of one legacy type go through a single step, so importing 500
+  records costs one scheduled task and one buffer — not 500. Your importer still maps one object at
+  a time; the batching is internal.
+- **Validated at `Build()`.** A payload type with no importer throws (naming the type); an importer
+  with no payloads only logs a warning, since it is harmless.
+- `SerializableGuidExtensions.Compute(key)` mints a reproducible id from a string, since legacy data
+  usually has no GUID. Optional — use `Guid.NewGuid()` if identity is arbitrary.
 
 ### Compression / Encryption
 
@@ -377,7 +470,7 @@ Or manually add the scoped registry to your `Packages/manifest.json`:
 ### Method 2: Unity package installer
 
 1. Download the latest `.unitypackage` from [GitHub Releases page](https://github.com/Saesentsessis/Unity-Data-Shards/releases).
-   - _Direct Link:_ [Unity-Data-Shards-Installer.unitypackage](https://github.com/Saesentsessis/Unity-Data-Shards/releases/download/0.2.1/Unity-Data-Shards-Installer.unitypackage)
+   - _Direct Link:_ [Unity-Data-Shards-Installer.unitypackage](https://github.com/Saesentsessis/Unity-Data-Shards/releases/download/0.3.0/Unity-Data-Shards-Installer.unitypackage)
 2. Import the downloaded package into your Unity project.
 3. The installer will automatically configure OpenUPM in your `manifest.json` file and install the package dependencies.
 
@@ -398,7 +491,7 @@ Or manually add the scoped registry to your `Packages/manifest.json`:
 You can specify exact release version of this package like this:
 
 ```
-https://github.com/Saesentsessis/Unity-Data-Shards.git?path=Unity-Data-Shards/Assets/root#0.2.1
+https://github.com/Saesentsessis/Unity-Data-Shards.git?path=Unity-Data-Shards/Assets/root#0.3.0
 ```
 
 ## Credits

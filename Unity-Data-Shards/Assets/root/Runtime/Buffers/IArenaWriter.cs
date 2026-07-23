@@ -1,6 +1,6 @@
 using System.Buffers;
 
-namespace Persistence.Buffers
+namespace Saesentsessis.Persistence.Buffers
 {
 	/// <summary>
 	/// What the save pipeline needs from an arena beyond <see cref="IBufferWriter{T}"/>:

@@ -3,9 +3,9 @@ using System.Buffers;
 using System.Buffers.Binary;
 using MessagePack;
 using MessagePack.Formatters;
-using Persistence.Core;
+using Saesentsessis.Persistence.Core;
 
-namespace Persistence.Serialization.MessagePack
+namespace Saesentsessis.Persistence.Serialization.MessagePack
 {
 	/// <summary>
 	/// Encodes <see cref="SerializableGuid"/> as a raw 16-byte MessagePack bin (Head, Tail — both

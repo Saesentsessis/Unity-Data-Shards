@@ -3,7 +3,7 @@ using System.Buffers;
 using MessagePack;
 using MessagePack.Resolvers;
 
-namespace Persistence.Serialization.MessagePack
+namespace Saesentsessis.Persistence.Serialization.MessagePack
 {
 	public class MyApplicationResolver : IFormatterResolver
 	{

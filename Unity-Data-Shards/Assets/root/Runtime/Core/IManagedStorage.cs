@@ -3,14 +3,14 @@ using System.Threading;
 #if PERSISTENCE_HAS_UNITASK
 using TaskType = Cysharp.Threading.Tasks.UniTask;
 using BoolTask = Cysharp.Threading.Tasks.UniTask<bool>;
-using ManagedStorageReadTask = Cysharp.Threading.Tasks.UniTask<Persistence.Core.ManagedStorageReadResult>;
+using ManagedStorageReadTask = Cysharp.Threading.Tasks.UniTask<Saesentsessis.Persistence.Core.ManagedStorageReadResult>;
 #else
 using TaskType = System.Threading.Tasks.Task;
 using BoolTask = System.Threading.Tasks.Task<bool>;
-using ManagedStorageReadTask = System.Threading.Tasks.Task<Persistence.Core.ManagedStorageReadResult>;
+using ManagedStorageReadTask = System.Threading.Tasks.Task<Saesentsessis.Persistence.Core.ManagedStorageReadResult>;
 #endif
 
-namespace Persistence.Core
+namespace Saesentsessis.Persistence.Core
 {
 	/// <summary>
 	/// Managed-memory counterpart of <see cref="IStorage"/>. Uses GC-tracked buffers,

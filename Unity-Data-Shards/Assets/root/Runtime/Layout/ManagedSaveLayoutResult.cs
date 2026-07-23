@@ -2,7 +2,7 @@ using System;
 using System.Buffers;
 using System.Runtime.CompilerServices;
 
-namespace Persistence.Layout
+namespace Saesentsessis.Persistence.Layout
 {
 	/// <summary>
 	/// Managed counterpart of <see cref="SaveLayoutResult"/>. Arrays may be rented

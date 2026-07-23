@@ -1,11 +1,11 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
-using Persistence.Core;
+using Saesentsessis.Persistence.Core;
 using Unity.Collections;
 using UnityEngine;
 
-namespace Persistence
+namespace Saesentsessis.Persistence
 {
 	/// <summary>
 	/// A flat, GUID-indexed set of shards. This is the unit the SaveManager persists:

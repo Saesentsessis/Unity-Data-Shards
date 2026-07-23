@@ -1,8 +1,8 @@
 ﻿using System;
 using System.Runtime.InteropServices;
-using Persistence.Core;
+using Saesentsessis.Persistence.Core;
 
-namespace Persistence.Layout
+namespace Saesentsessis.Persistence.Layout
 {
 	[Serializable]
 	[StructLayout(LayoutKind.Sequential)]

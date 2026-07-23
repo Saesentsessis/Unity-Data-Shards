@@ -2,7 +2,7 @@ using System;
 using System.Runtime.CompilerServices;
 using Unity.Collections;
 
-namespace Persistence.Core
+namespace Saesentsessis.Persistence.Core
 {
 	/// <summary>
 	/// Result of <see cref="IStorage.TryReadAsync"/>. <see cref="Found"/> is false when

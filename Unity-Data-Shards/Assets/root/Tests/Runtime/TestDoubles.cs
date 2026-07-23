@@ -2,25 +2,25 @@ using System;
 using System.Buffers;
 using System.Collections.Generic;
 using System.Threading;
-using Persistence.Core;
-using Persistence.Layout;
-using Persistence.Serialization;
-using Persistence.Threading;
+using Saesentsessis.Persistence.Core;
+using Saesentsessis.Persistence.Layout;
+using Saesentsessis.Persistence.Serialization;
+using Saesentsessis.Persistence.Threading;
 using Unity.Collections;
 using UnityEngine;
 #if PERSISTENCE_HAS_UNITASK
 using TaskType = Cysharp.Threading.Tasks.UniTask;
 using BoolTask = Cysharp.Threading.Tasks.UniTask<bool>;
-using StorageReadTask = Cysharp.Threading.Tasks.UniTask<Persistence.Core.StorageReadResult>;
-using SaveLayoutTask = Cysharp.Threading.Tasks.UniTask<Persistence.Layout.SaveLayoutResult>;
+using StorageReadTask = Cysharp.Threading.Tasks.UniTask<Saesentsessis.Persistence.Core.StorageReadResult>;
+using SaveLayoutTask = Cysharp.Threading.Tasks.UniTask<Saesentsessis.Persistence.Layout.SaveLayoutResult>;
 #else
 using TaskType = System.Threading.Tasks.Task;
 using BoolTask = System.Threading.Tasks.Task<bool>;
-using StorageReadTask = System.Threading.Tasks.Task<Persistence.Core.StorageReadResult>;
-using SaveLayoutTask = System.Threading.Tasks.Task<Persistence.Layout.SaveLayoutResult>;
+using StorageReadTask = System.Threading.Tasks.Task<Saesentsessis.Persistence.Core.StorageReadResult>;
+using SaveLayoutTask = System.Threading.Tasks.Task<Saesentsessis.Persistence.Layout.SaveLayoutResult>;
 #endif
 
-namespace Persistence.Tests
+namespace Saesentsessis.Persistence.Tests
 {
 	[Serializable]
 	[ShardSchema(1)]
@@ -72,6 +72,14 @@ namespace Persistence.Tests
 		[SerializeField] private SerializableGuid id;
 		[SerializeField] public int points;
 
+		public ModernShard() { }
+
+		public ModernShard(Guid guid, int points)
+		{
+			id = guid;
+			this.points = points;
+		}
+
 		public SerializableGuid Identifier => id;
 	}
 
@@ -96,6 +104,16 @@ namespace Persistence.Tests
 			var bytes = System.Text.Encoding.UTF8.GetBytes(json);
 			dst.Write(bytes);
 		}
+	}
+
+	/// <summary>Typed counterpart of <see cref="LegacyToModernMigration"/>: converts via plain C#
+	/// instead of touching serialized bytes. Identity is carried over explicitly.</summary>
+	public sealed class TypedLegacyToModern : TypedShardMigration<LegacyShard, ModernShard>
+	{
+		public TypedLegacyToModern() : base(fromVersion: 1, toVersion: 2) { }
+
+		protected override ModernShard Convert(LegacyShard old)
+			=> new ModernShard(old.Identifier, old.value);
 	}
 
 	/// <summary>Reverse of <see cref="LegacyToModernMigration"/>; registered together they form a cycle.</summary>

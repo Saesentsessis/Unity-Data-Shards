@@ -1,8 +1,8 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using Persistence.Core;
+using Saesentsessis.Persistence.Core;
 
-namespace Persistence.Layout
+namespace Saesentsessis.Persistence.Layout
 {
 	/// <summary>
 	/// Locates one shard's serialized bytes inside the contiguous payload arena:

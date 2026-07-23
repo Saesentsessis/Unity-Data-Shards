@@ -1,7 +1,7 @@
 using System;
 using System.Buffers;
 
-namespace Persistence.Core
+namespace Saesentsessis.Persistence.Core
 {
 	/// <summary>
 	/// A single migration step operating on the RAW serialized blob, before any

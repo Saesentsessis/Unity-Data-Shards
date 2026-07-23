@@ -2,7 +2,7 @@ using System;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
-namespace Persistence.Layout
+namespace Saesentsessis.Persistence.Layout
 {
 	/// <summary>
 	/// Compact, version-free descriptor of a shard type, mirroring Unity's [SerializeReference]

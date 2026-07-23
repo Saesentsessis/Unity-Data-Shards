@@ -1,11 +1,10 @@
 ﻿using System;
-using System.Runtime.CompilerServices;
-using Persistence.Core;
+using Saesentsessis.Persistence.Core;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using UnityEngine;
 
-namespace Persistence
+namespace Saesentsessis.Persistence
 {
 	public static class SerializableGuidExtensions
 	{

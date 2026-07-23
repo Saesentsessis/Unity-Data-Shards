@@ -1,10 +1,10 @@
 using System;
 using System.Buffers;
 using System.Text;
-using Persistence.Core;
+using Saesentsessis.Persistence.Core;
 using UnityEngine;
 
-namespace Persistence.Serialization
+namespace Saesentsessis.Persistence.Serialization
 {
     /// <summary>
     /// Uses Unity's <see cref="JsonUtility"/> under the hood. Serializes [SerializeField]

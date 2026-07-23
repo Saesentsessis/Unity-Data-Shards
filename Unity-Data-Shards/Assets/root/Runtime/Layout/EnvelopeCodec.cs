@@ -2,10 +2,10 @@ using System;
 using System.Buffers;
 using System.Buffers.Binary;
 using System.Text;
-using Persistence.Core;
+using Saesentsessis.Persistence.Core;
 using Unity.Collections;
 
-namespace Persistence.Layout
+namespace Saesentsessis.Persistence.Layout
 {
 	/// <summary>
 	/// Fixed binary codec for <see cref="SaveEnvelope"/>, format v3 (little-endian):

@@ -10,7 +10,7 @@ using UnityEngine.LowLevel;
 using UnityEditor;
 #endif
 
-namespace Persistence.Threading
+namespace Saesentsessis.Persistence.Threading
 {
 	/// <summary>
 	/// PlayerLoop-driven main-thread dispatcher used when UniTask is absent. Continuations that

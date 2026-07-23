@@ -3,19 +3,19 @@ using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using NUnit.Framework;
-using Persistence.Buffers;
-using Persistence.Core;
-using Persistence.Layout;
-using Persistence.Serialization;
+using Saesentsessis.Persistence.Buffers;
+using Saesentsessis.Persistence.Core;
+using Saesentsessis.Persistence.Layout;
+using Saesentsessis.Persistence.Serialization;
 using Unity.Collections;
 using UnityEngine.TestTools;
 #if PERSISTENCE_HAS_UNITASK
-using SampleTask = Cysharp.Threading.Tasks.UniTask<System.ValueTuple<Persistence.Tests.MemoryStorage, Persistence.SaveManager>>;
+using SampleTask = Cysharp.Threading.Tasks.UniTask<System.ValueTuple<Saesentsessis.Persistence.Tests.MemoryStorage, Saesentsessis.Persistence.SaveManager>>;
 #else
-using SampleTask = System.Threading.Tasks.Task<System.ValueTuple<Persistence.Tests.MemoryStorage, Persistence.SaveManager>>;
+using SampleTask = System.Threading.Tasks.Task<System.ValueTuple<Saesentsessis.Persistence.Tests.MemoryStorage, Saesentsessis.Persistence.SaveManager>>;
 #endif
 
-namespace Persistence.Tests
+namespace Saesentsessis.Persistence.Tests
 {
 	public class CodecTests
 	{

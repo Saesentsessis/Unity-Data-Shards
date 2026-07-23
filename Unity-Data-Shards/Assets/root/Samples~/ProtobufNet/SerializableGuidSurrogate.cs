@@ -1,7 +1,7 @@
-using Persistence.Core;
+using Saesentsessis.Persistence.Core;
 using ProtoBuf;
 
-namespace Persistence.Serialization.ProtobufNet
+namespace Saesentsessis.Persistence.Serialization.ProtobufNet
 {
 	/// <summary>
 	/// protobuf-net surrogate for <see cref="SerializableGuid"/> — protobuf-net maps unsupported

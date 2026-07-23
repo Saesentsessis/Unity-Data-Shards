@@ -2,7 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 
-namespace Persistence.Core
+namespace Saesentsessis.Persistence.Core
 {
 	[AttributeUsage(AttributeTargets.Class, Inherited = false)]
 	public sealed class ShardSchemaAttribute : Attribute

@@ -5,7 +5,7 @@ using Unity.Burst;
 using Unity.Collections.LowLevel.Unsafe;
 using UnityEngine;
 
-namespace Persistence.Core
+namespace Saesentsessis.Persistence.Core
 {
 	[Serializable]
 	[StructLayout(LayoutKind.Sequential)]

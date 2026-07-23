@@ -1,6 +1,6 @@
 using System;
 
-namespace Persistence.Core
+namespace Saesentsessis.Persistence.Core
 {
 	/// <summary>
 	/// Thrown when persisted save data fails integrity validation: checksum mismatch,

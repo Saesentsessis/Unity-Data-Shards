@@ -2,12 +2,12 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using NUnit.Framework;
-using Persistence.Core;
-using Persistence.Layout;
-using Persistence.Serialization;
+using Saesentsessis.Persistence.Core;
+using Saesentsessis.Persistence.Layout;
+using Saesentsessis.Persistence.Serialization;
 using UnityEngine.TestTools;
 
-namespace Persistence.Tests
+namespace Saesentsessis.Persistence.Tests
 {
 	public class SaveSystemTests
 	{
@@ -166,6 +166,75 @@ namespace Persistence.Tests
 			Assert.IsNotNull(modern, $"Expected ModernShard, got {loaded[0].GetType().Name}.");
 			Assert.AreEqual(1234, modern.points, "Field must be carried over by the blob migration.");
 			Assert.IsTrue(modern.Identifier.Equals((SerializableGuid)legacyId), "Identity must survive migration.");
+		});
+
+		[UnityTest]
+		public IEnumerator Migration_Typed_ConvertsViaSerializer() => AsyncTest.Run(async () =>
+		{
+			var migrations = new MigrationRegistry();
+			migrations.Register(new TypedLegacyToModern());
+
+			var manager = CreateManager(out _, migrations);
+			var legacyId = Guid.NewGuid();
+			await manager.SaveAsync(Slot, new List<IDataShard> { new LegacyShard(legacyId, 1234) });
+
+			var loaded = await manager.LoadAsync(Slot);
+
+			Assert.AreEqual(1, loaded.Count);
+			var modern = loaded[0] as ModernShard;
+			Assert.IsNotNull(modern, $"Expected ModernShard, got {loaded[0].GetType().Name}.");
+			Assert.AreEqual(1234, modern.points, "Typed Convert must carry the field over.");
+			Assert.IsTrue(modern.Identifier.Equals((SerializableGuid)legacyId), "Typed Convert must preserve identity.");
+		});
+
+		[Test]
+		public void TypedMigration_WithoutSerializer_Throws()
+		{
+			var migration = new TypedLegacyToModern();
+			var writer = new System.Buffers.ArrayBufferWriter<byte>();
+
+			// Never bound to a serializer (no SaveManager) -> guard must fire.
+			Assert.Throws<InvalidOperationException>(() => migration.Migrate(default, writer));
+		}
+
+		[UnityTest]
+		public IEnumerator Builder_FromRegistryBuilder_AppliesTypedMigration() => AsyncTest.Run(async () =>
+		{
+			var storage = new MemoryStorage();
+			var manager = new SaveManagerBuilder()
+				.WithSerializer(new UnityJsonSerializer())
+				.WithLayout(new SingleFileSaveLayout(storage))
+				.WithMigrations(new MigrationRegistryBuilder().Add(new TypedLegacyToModern()))
+				.Build();
+
+			var legacyId = Guid.NewGuid();
+			await manager.SaveAsync(Slot, new List<IDataShard> { new LegacyShard(legacyId, 42) });
+
+			var loaded = await manager.LoadAsync(Slot);
+
+			var modern = loaded[0] as ModernShard;
+			Assert.IsNotNull(modern, "Builder-wired serializer binding must reach the typed migration.");
+			Assert.AreEqual(42, modern.points);
+		});
+
+		[UnityTest]
+		public IEnumerator Builder_FromPrebuiltRegistry_AppliesRawMigration() => AsyncTest.Run(async () =>
+		{
+			var storage = new MemoryStorage();
+			var registry = new MigrationRegistry();
+			registry.Register(new LegacyToModernMigration());
+
+			var manager = new SaveManagerBuilder()
+				.WithSerializer(new UnityJsonSerializer())
+				.WithLayout(new SingleFileSaveLayout(storage))
+				.WithMigrations(registry)
+				.Build();
+
+			await manager.SaveAsync(Slot, new List<IDataShard> { new LegacyShard(Guid.NewGuid(), 7) });
+
+			var loaded = await manager.LoadAsync(Slot);
+			Assert.IsInstanceOf<ModernShard>(loaded[0]);
+			Assert.AreEqual(7, ((ModernShard)loaded[0]).points);
 		});
 
 		[Test]

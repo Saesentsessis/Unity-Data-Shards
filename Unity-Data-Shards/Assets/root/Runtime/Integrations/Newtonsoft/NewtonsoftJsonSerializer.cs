@@ -3,9 +3,9 @@ using System;
 using System.Buffers;
 using System.Text;
 using Newtonsoft.Json;
-using Persistence.Core;
+using Saesentsessis.Persistence.Core;
 
-namespace Persistence.Serialization.Newtonsoft
+namespace Saesentsessis.Persistence.Serialization.Newtonsoft
 {
 	/// <summary>
 	/// <see cref="ISerializer"/> backed by Newtonsoft.Json (<c>com.unity.nuget.newtonsoft-json</c>).

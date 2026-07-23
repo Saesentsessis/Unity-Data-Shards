@@ -6,7 +6,7 @@ using Cysharp.Threading.Tasks;
 using System.Threading.Tasks;
 #endif
 
-namespace Persistence.Threading
+namespace Saesentsessis.Persistence.Threading
 {
 	/// <summary>
 	/// Backend-agnostic async primitives used by the save pipeline. When
@@ -28,6 +28,9 @@ namespace Persistence.Threading
 		public static UniTask RunOnThreadPool<TState>(Action<TState> action, TState state, CancellationToken cancellation = default)
 			=> UniTask.RunOnThreadPool(() => action(state), cancellationToken: cancellation);
 
+		/// <summary>Joins previously scheduled work. Faulted entries surface on await.</summary>
+		public static UniTask WhenAll(UniTask[] tasks) => UniTask.WhenAll(tasks);
+
 		public static SwitchToThreadPoolAwaitable SwitchToThreadPool() => UniTask.SwitchToThreadPool();
 
 		public static SwitchToMainThreadAwaitable SwitchToMainThread(CancellationToken cancellation = default) => UniTask.SwitchToMainThread(cancellation);
@@ -45,6 +48,9 @@ namespace Persistence.Threading
 
 		public static Task RunOnThreadPool<TState>(Action<TState> action, TState state, CancellationToken cancellation = default)
 			=> Task.Run(() => action(state), cancellation);
+
+		/// <summary>Joins previously scheduled work. Faulted entries surface on await.</summary>
+		public static Task WhenAll(Task[] tasks) => Task.WhenAll(tasks);
 
 		public static SwitchToThreadPoolAwaitable SwitchToThreadPool() => default;
 

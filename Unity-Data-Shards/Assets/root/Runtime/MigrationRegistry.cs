@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
-using Persistence.Buffers;
-using Persistence.Core;
+using Saesentsessis.Persistence.Buffers;
+using Saesentsessis.Persistence.Core;
 
-namespace Persistence
+namespace Saesentsessis.Persistence
 {
 	public sealed class MigrationRegistry
 	{
@@ -12,6 +12,27 @@ namespace Persistence
 		private const int MaxChainLength = 64;
 
 		private readonly Dictionary<SchemaState, IShardMigration> _migrations = new();
+		private ISerializer _serializer;
+
+		public MigrationRegistry() { }
+		
+		public MigrationRegistry(IReadOnlyList<IShardMigration> migrations)
+		{
+			_migrations.EnsureCapacity(migrations.Count);
+
+			for (var i = migrations.Count - 1; i >= 0; i--)
+			{
+				var migration = migrations[i];
+				
+				if (migration.FromTypeName == migration.ToType.FullName && migration.ToVersion <= migration.FromVersion)
+					throw new ArgumentException($"Same-type migration ToVersion ({migration.ToVersion}) must be greater than FromVersion ({migration.FromVersion}).");
+
+				var state = new SchemaState(migration.FromTypeName, migration.FromVersion);
+
+				if (_migrations.TryAdd(state, migration) == false)
+					throw new ArgumentException($"Migration already registered for {migration.FromTypeName} v{migration.FromVersion}. Branching paths are not supported.");
+			}
+		}
 
 		public void Register(IShardMigration migration)
 		{
@@ -22,6 +43,28 @@ namespace Persistence
 
 			if (_migrations.TryAdd(state, migration) == false)
 				throw new ArgumentException($"Migration already registered for {migration.FromTypeName} v{migration.FromVersion}. Branching paths are not supported.");
+
+			// If the serializer is already known (registry reached a SaveManager before this
+			// late registration), bind it now; otherwise BindSerializer will pick it up later.
+			if (_serializer != null && migration is ISerializerAware aware)
+				aware.BindSerializer(_serializer);
+		}
+
+		/// <summary>
+		/// Supplies the active serializer to every registered <see cref="ISerializerAware"/>
+		/// migration (e.g. <see cref="TypedShardMigration{TOld,TNew}"/>). Called by
+		/// <see cref="SaveManager"/> at construction; made order-independent by also binding
+		/// from <see cref="Register"/> once the serializer is known.
+		/// </summary>
+		internal void BindSerializer(ISerializer serializer)
+		{
+			_serializer = serializer;
+
+			foreach (var migration in _migrations.Values)
+			{
+				if (migration is ISerializerAware aware)
+					aware.BindSerializer(serializer);
+			}
 		}
 
 		/// <summary>True if a migration chain starts at the given stored state.</summary>
@@ -36,7 +79,7 @@ namespace Persistence
 		/// </summary>
 		public PooledArrayBufferWriter MigrateToLatest(ReadOnlySpan<byte> blob, string typeName, int storedVersion, out Type finalType)
 		{
-			PooledArrayBufferWriter front = null, back = null;
+			PooledArrayBufferWriter frontBuffer = null, backBuffer = null;
 			var current = blob;
 			finalType = null;
 			var name = typeName;
@@ -51,17 +94,17 @@ namespace Persistence
 						throw new InvalidOperationException(
 							$"Migration chain starting at {typeName} v{storedVersion} exceeded {MaxChainLength} steps — registered migrations likely form a cycle.");
 
-					front ??= new PooledArrayBufferWriter(current.Length + 64);
-					front.Clear();
-					migration.Migrate(current, front);
+					frontBuffer ??= new PooledArrayBufferWriter(current.Length + 64);
+					frontBuffer.Clear();
+					migration.Migrate(current, frontBuffer);
 
 					finalType = migration.ToType;
 					name = finalType.FullName;
 					version = migration.ToVersion;
-					current = front.WrittenSpan;
+					current = frontBuffer.WrittenSpan;
 
 					// The next step writes into the other buffer while reading this one.
-					(front, back) = (back, front);
+					(frontBuffer, backBuffer) = (backBuffer, frontBuffer);
 				}
 
 				if (finalType == null)
@@ -76,13 +119,13 @@ namespace Persistence
 					throw new InvalidOperationException($"Data version ({version}) exceeds schema version ({targetVersion}) for {finalType.Name}.");
 
 				// After the final swap the result lives in 'back'; 'front' is scratch.
-				front?.Dispose();
-				return back;
+				frontBuffer?.Dispose();
+				return backBuffer;
 			}
 			catch
 			{
-				front?.Dispose();
-				back?.Dispose();
+				frontBuffer?.Dispose();
+				backBuffer?.Dispose();
 				throw;
 			}
 		}

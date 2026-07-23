@@ -1,8 +1,8 @@
 using System;
 using NUnit.Framework;
-using Persistence.Core;
+using Saesentsessis.Persistence.Core;
 
-namespace Persistence.Tests
+namespace Saesentsessis.Persistence.Tests
 {
 	public class SerializableGuidTests
 	{

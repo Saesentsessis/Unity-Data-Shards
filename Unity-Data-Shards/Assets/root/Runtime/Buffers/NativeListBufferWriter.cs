@@ -4,7 +4,7 @@ using System.Runtime.CompilerServices;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 
-namespace Persistence.Buffers
+namespace Saesentsessis.Persistence.Buffers
 {
 	/// <summary>
 	/// <see cref="IBufferWriter{T}"/> over a <see cref="NativeList{T}"/> — the save
