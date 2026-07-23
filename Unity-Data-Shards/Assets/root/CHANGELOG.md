@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-07-23
+
+### Fixed
+
+- `SerializableGuidExtensions.Compute` aliased the input as a `NativeArray<char>`; `char` is not a valid element type there, so the deterministic-id helper could not hash a key correctly. It now aliases the same memory as `ushort`, and the `string` overload delegates to the span overload instead of duplicating the logic.
+
 ## [0.2.0] - 2026-07-23
 
 ### Added
@@ -61,5 +67,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Tests**: round-trips (0–1000 shards, both storage backends), incremental-save dirty accounting, envelope cache reuse/invalidation, background-serialization round-trip, blob migration with type rename, broken/cyclic chain detection, codec truncation fuzzing at every byte offset, whole-file bit-flip checksum sweep, `FileStorage` crash-recovery scenarios.
 - Dependencies: `com.cysharp.unitask` 2.3.3, `com.unity.collections` 2.1.4, `com.unity.burst` 1.8.0; Unity 2022.3+.
 
+[0.2.1]: https://github.com/Saesentsessis/Unity-Data-Shards/compare/0.2.0...0.2.1
 [0.2.0]: https://github.com/Saesentsessis/Unity-Data-Shards/compare/0.1.0...0.2.0
 [0.1.0]: https://github.com/Saesentsessis/Unity-Data-Shards/releases/tag/0.1.0

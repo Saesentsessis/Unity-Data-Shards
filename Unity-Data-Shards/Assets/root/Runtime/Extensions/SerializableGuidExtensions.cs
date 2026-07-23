@@ -15,11 +15,7 @@ namespace Persistence
 		/// <param name="key">Input string.</param>
 		/// <returns>Deterministic Guid.</returns>
 		public static SerializableGuid Compute(string key)
-		{
-			var hash = Hash128.Compute(key);
-			
-			return UnsafeUtility.As<Hash128, SerializableGuid>(ref hash);
-		}
+			=> Compute((ReadOnlySpan<char>)key);
 
 		/// <summary>
 		/// Deterministic way of generating Guid. The same span outputs the same Guid.
@@ -32,7 +28,7 @@ namespace Persistence
 
 			fixed (char* charsPtr = span)
 			{
-				var array = NativeArrayUnsafeUtility.ConvertExistingDataToNativeArray<char>(charsPtr, span.Length, Allocator.None);
+				var array = NativeArrayUnsafeUtility.ConvertExistingDataToNativeArray<ushort>(charsPtr, span.Length, Allocator.None);
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
 				// Aliased arrays carry no safety handle; without one, any read throws
 				// under collections checks (editor / development builds).
