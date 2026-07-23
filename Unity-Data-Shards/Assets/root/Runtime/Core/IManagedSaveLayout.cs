@@ -1,17 +1,17 @@
 using System;
 using System.Threading;
-using Persistence.Layout;
+using Saesentsessis.Persistence.Layout;
 #if PERSISTENCE_HAS_UNITASK
 using TaskType = Cysharp.Threading.Tasks.UniTask;
 using BoolTask = Cysharp.Threading.Tasks.UniTask<bool>;
-using ManagedSaveLayoutTask = Cysharp.Threading.Tasks.UniTask<Persistence.Layout.ManagedSaveLayoutResult>;
+using ManagedSaveLayoutTask = Cysharp.Threading.Tasks.UniTask<Saesentsessis.Persistence.Layout.ManagedSaveLayoutResult>;
 #else
 using TaskType = System.Threading.Tasks.Task;
 using BoolTask = System.Threading.Tasks.Task<bool>;
-using ManagedSaveLayoutTask = System.Threading.Tasks.Task<Persistence.Layout.ManagedSaveLayoutResult>;
+using ManagedSaveLayoutTask = System.Threading.Tasks.Task<Saesentsessis.Persistence.Layout.ManagedSaveLayoutResult>;
 #endif
 
-namespace Persistence.Core
+namespace Saesentsessis.Persistence.Core
 {
 	/// <summary>
 	/// Managed-memory counterpart of <see cref="ISaveLayout"/>. Identical arena +

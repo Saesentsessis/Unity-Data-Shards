@@ -1,19 +1,19 @@
 using System;
 using System.Threading;
-using Persistence.Buffers;
-using Persistence.Core;
+using Saesentsessis.Persistence.Buffers;
+using Saesentsessis.Persistence.Core;
 using Unity.Collections;
 #if PERSISTENCE_HAS_UNITASK
 using TaskType = Cysharp.Threading.Tasks.UniTask;
 using BoolTask = Cysharp.Threading.Tasks.UniTask<bool>;
-using StorageReadTask = Cysharp.Threading.Tasks.UniTask<Persistence.Core.StorageReadResult>;
+using StorageReadTask = Cysharp.Threading.Tasks.UniTask<Saesentsessis.Persistence.Core.StorageReadResult>;
 #else
 using TaskType = System.Threading.Tasks.Task;
 using BoolTask = System.Threading.Tasks.Task<bool>;
-using StorageReadTask = System.Threading.Tasks.Task<Persistence.Core.StorageReadResult>;
+using StorageReadTask = System.Threading.Tasks.Task<Saesentsessis.Persistence.Core.StorageReadResult>;
 #endif
 
-namespace Persistence.Storage
+namespace Saesentsessis.Persistence.Storage
 {
 	/// <summary>
 	/// <see cref="IStorage"/> decorator applying an <see cref="ISaveTransform"/> chain

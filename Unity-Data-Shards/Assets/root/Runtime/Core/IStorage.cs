@@ -3,14 +3,14 @@ using Unity.Collections;
 #if PERSISTENCE_HAS_UNITASK
 using TaskType = Cysharp.Threading.Tasks.UniTask;
 using BoolTask = Cysharp.Threading.Tasks.UniTask<bool>;
-using StorageReadTask = Cysharp.Threading.Tasks.UniTask<Persistence.Core.StorageReadResult>;
+using StorageReadTask = Cysharp.Threading.Tasks.UniTask<Saesentsessis.Persistence.Core.StorageReadResult>;
 #else
 using TaskType = System.Threading.Tasks.Task;
 using BoolTask = System.Threading.Tasks.Task<bool>;
-using StorageReadTask = System.Threading.Tasks.Task<Persistence.Core.StorageReadResult>;
+using StorageReadTask = System.Threading.Tasks.Task<Saesentsessis.Persistence.Core.StorageReadResult>;
 #endif
 
-namespace Persistence.Core
+namespace Saesentsessis.Persistence.Core
 {
     /// <summary>
     /// Async key-value byte storage backed by unmanaged NativeArrays.

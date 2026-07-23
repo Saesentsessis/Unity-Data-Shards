@@ -2,9 +2,9 @@ using System;
 using System.Buffers;
 using MessagePack;
 using MessagePack.Resolvers;
-using Persistence.Core;
+using Saesentsessis.Persistence.Core;
 
-namespace Persistence.Serialization.MessagePack
+namespace Saesentsessis.Persistence.Serialization.MessagePack
 {
 	/// <summary>
 	/// <see cref="ISerializer"/> backed by MessagePack-CSharp. Serialization writes straight into the

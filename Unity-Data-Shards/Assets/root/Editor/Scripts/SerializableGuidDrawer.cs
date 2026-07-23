@@ -1,9 +1,9 @@
 ﻿using System;
-using Persistence.Core;
+using Saesentsessis.Persistence.Core;
 using UnityEditor;
 using UnityEngine;
 
-namespace Persistence.Editor
+namespace Saesentsessis.Persistence.Editor
 {
 	[CustomPropertyDrawer(typeof(SerializableGuid))]
 	public class SerializableGuidDrawer : PropertyDrawer

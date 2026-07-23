@@ -3,9 +3,9 @@ using System.Buffers;
 using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
-using Persistence.Core;
+using Saesentsessis.Persistence.Core;
 
-namespace Persistence.Serialization.SystemTextJson
+namespace Saesentsessis.Persistence.Serialization.SystemTextJson
 {
 	/// <summary>
 	/// <see cref="ISerializer"/> backed by System.Text.Json. <see cref="Utf8JsonWriter"/> targets

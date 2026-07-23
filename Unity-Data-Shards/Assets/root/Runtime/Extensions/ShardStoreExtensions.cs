@@ -1,13 +1,13 @@
 using System.Collections.Generic;
 using System.Threading;
-using Persistence.Core;
+using Saesentsessis.Persistence.Core;
 #if PERSISTENCE_HAS_UNITASK
-using ShardStoreTask = Cysharp.Threading.Tasks.UniTask<Persistence.ShardStore>;
+using ShardStoreTask = Cysharp.Threading.Tasks.UniTask<Saesentsessis.Persistence.ShardStore>;
 #else
-using ShardStoreTask = System.Threading.Tasks.Task<Persistence.ShardStore>;
+using ShardStoreTask = System.Threading.Tasks.Task<Saesentsessis.Persistence.ShardStore>;
 #endif
 
-namespace Persistence
+namespace Saesentsessis.Persistence
 {
 	public static class ShardStoreExtensions
 	{

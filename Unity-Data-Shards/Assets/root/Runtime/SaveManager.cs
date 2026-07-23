@@ -2,25 +2,25 @@ using System;
 using System.Buffers;
 using System.Collections.Generic;
 using System.Threading;
-using Persistence.Buffers;
-using Persistence.Core;
-using Persistence.Layout;
-using Persistence.Threading;
+using Saesentsessis.Persistence.Buffers;
+using Saesentsessis.Persistence.Core;
+using Saesentsessis.Persistence.Layout;
+using Saesentsessis.Persistence.Threading;
 using Unity.Collections;
 using UnityEngine.Pool;
 #if PERSISTENCE_HAS_UNITASK
 using TaskType = Cysharp.Threading.Tasks.UniTask;
 using BoolTask = Cysharp.Threading.Tasks.UniTask<bool>;
-using LoadResultTask = Cysharp.Threading.Tasks.UniTask<System.Collections.Generic.IReadOnlyList<Persistence.Core.IDataShard>>;
-using ShardArrayTask = Cysharp.Threading.Tasks.UniTask<Persistence.Core.IDataShard[]>;
+using LoadResultTask = Cysharp.Threading.Tasks.UniTask<System.Collections.Generic.IReadOnlyList<Saesentsessis.Persistence.Core.IDataShard>>;
+using ShardArrayTask = Cysharp.Threading.Tasks.UniTask<Saesentsessis.Persistence.Core.IDataShard[]>;
 #else
 using TaskType = System.Threading.Tasks.Task;
 using BoolTask = System.Threading.Tasks.Task<bool>;
-using LoadResultTask = System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Persistence.Core.IDataShard>>;
-using ShardArrayTask = System.Threading.Tasks.Task<Persistence.Core.IDataShard[]>;
+using LoadResultTask = System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Saesentsessis.Persistence.Core.IDataShard>>;
+using ShardArrayTask = System.Threading.Tasks.Task<Saesentsessis.Persistence.Core.IDataShard[]>;
 #endif
 
-namespace Persistence
+namespace Saesentsessis.Persistence
 {
 	public sealed class SaveManager
 	{
@@ -40,12 +40,14 @@ namespace Persistence
 		{
 			_pipeline = new UnmanagedPipeline(serializer, layout);
 			_migrations = migrations;
+			migrations?.BindSerializer(serializer);
 		}
 
 		public SaveManager(ISerializer serializer, IManagedSaveLayout layout, MigrationRegistry migrations = null)
 		{
 			_pipeline = new ManagedPipeline(serializer, layout);
 			_migrations = migrations;
+			migrations?.BindSerializer(serializer);
 		}
 
 		/// <summary>

@@ -18,10 +18,10 @@ its plugin importer so this sample's assembly can see it.
 ## Usage
 
 ```csharp
-using Persistence;
-using Persistence.Layout;
-using Persistence.Serialization.SystemTextJson;
-using Persistence.Storage;
+using Saesentsessis.Persistence;
+using Saesentsessis.Persistence.Layout;
+using Saesentsessis.Persistence.Serialization.SystemTextJson;
+using Saesentsessis.Persistence.Storage;
 
 var serializer = new SystemTextJsonSerializer();
 var manager = new SaveManager(serializer, new SingleFileSaveLayout(new FileStorage()));

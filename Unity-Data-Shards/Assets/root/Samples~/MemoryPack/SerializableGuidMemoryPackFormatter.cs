@@ -1,7 +1,7 @@
 using MemoryPack;
-using Persistence.Core;
+using Saesentsessis.Persistence.Core;
 
-namespace Persistence.Serialization.MemoryPack
+namespace Saesentsessis.Persistence.Serialization.MemoryPack
 {
 	/// <summary>
 	/// Encodes <see cref="SerializableGuid"/> as its raw 16 unmanaged bytes. Because the struct is a

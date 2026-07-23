@@ -1,7 +1,7 @@
 using System;
 using System.Collections;
 
-namespace Persistence.Tests
+namespace Saesentsessis.Persistence.Tests
 {
 	/// <summary>
 	/// Bridges an async test body to the <c>[UnityTest]</c> <see cref="IEnumerator"/> contract for

@@ -2,11 +2,11 @@ using System;
 using System.Buffers;
 using System.Collections.Generic;
 using System.Reflection;
-using Persistence.Core;
+using Saesentsessis.Persistence.Core;
 using ProtoBuf.Meta;
 using UnityEngine;
 
-namespace Persistence.Serialization.ProtobufNet
+namespace Saesentsessis.Persistence.Serialization.ProtobufNet
 {
 	/// <summary>
 	/// <see cref="ISerializer"/> backed by protobuf-net (v3, which is <see cref="IBufferWriter{T}"/>-

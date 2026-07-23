@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-07-23
+
+### Added
+
+- `TypedShardMigration<TOld, TNew>` — a typed migration tier that lets authors convert in plain C# (`protected abstract TNew Convert(TOld old)`) instead of reshaping raw serialized bytes. It is an adapter over `IShardMigration`, so the migration chain and `MigrationRegistry` are unchanged. The active serializer is bound automatically when the registry reaches a `SaveManager`, via the new `ISerializerAware` interface.
+- `SaveManagerBuilder` and `MigrationRegistryBuilder` — fluent construction. `SaveManagerBuilder` accepts either a ready `MigrationRegistry` or a `MigrationRegistryBuilder` and selects the matching `ISaveLayout` / `IManagedSaveLayout` overload. `MigrationRegistry` also gained a bulk `IReadOnlyList<IShardMigration>` constructor.
+- README "Typed migrations" and "Building a SaveManager" subsections documenting the above.
+- `Saesentsessis.Persistence.Import` — a one-shot pipeline for adopting existing **non-shard** saves, separate from `MigrationRegistry` (foreign data has no envelope or checksum, so it cannot enter the load-time migration chain). `IShardImporter<TLegacy>` maps a caller-loaded legacy object onto shards; `ShardImportPipeline` / `ShardImportPipelineBuilder` schedule every `SupportsBackgroundImport` importer onto the thread pool first and run the main-thread importers concurrently with them, joining both groups before committing a single save. Skips by default when the slot already holds a save (`ImportOptions.Overwrite` opts into re-import). The legacy source is never read, moved or deleted.
+- Importers and payloads are registered independently — `AddImporter<TLegacy>` / `AddData<TLegacy>` / `AddDataRange<TLegacy>` — and paired by legacy type at `Build()`. Several importers may share one legacy type; a payload type with no importer throws (naming every unmatched type), while an importer with no payloads only logs a warning. All generic construction happens at the statically-typed registration site, so the builder never reflects over types and stays IL2CPP/AOT-safe.
+- Payloads of the same legacy type are batched into a single step, so a background import of N records costs one scheduled task and one pooled buffer instead of N. Duplicate ids are attributed to the exact importer and payload index.
+- `PersistenceTask.WhenAll` — backend-agnostic join primitive used by the import pipeline.
+- README "Importing Existing (Non-Shard) Saves" section documenting the above.
+
+### Changed
+
+- **BREAKING:** every namespace moved from `Persistence.*` to `Saesentsessis.Persistence.*`, matching the assembly definition names. Consumers must update their `using` directives (`using Persistence;` → `using Saesentsessis.Persistence;`, and likewise for `.Core`, `.Layout`, `.Storage`, `.Serialization`, `.Buffers`, `.Threading`, `.Import`). The `Samples~` serializers moved with it (`Saesentsessis.Persistence.Serialization.MemoryPack` and friends). No type names or behaviour changed.
+
 ## [0.2.1] - 2026-07-23
 
 ### Fixed
@@ -67,6 +84,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Tests**: round-trips (0–1000 shards, both storage backends), incremental-save dirty accounting, envelope cache reuse/invalidation, background-serialization round-trip, blob migration with type rename, broken/cyclic chain detection, codec truncation fuzzing at every byte offset, whole-file bit-flip checksum sweep, `FileStorage` crash-recovery scenarios.
 - Dependencies: `com.cysharp.unitask` 2.3.3, `com.unity.collections` 2.1.4, `com.unity.burst` 1.8.0; Unity 2022.3+.
 
+[0.3.0]: https://github.com/Saesentsessis/Unity-Data-Shards/compare/0.2.1...0.3.0
 [0.2.1]: https://github.com/Saesentsessis/Unity-Data-Shards/compare/0.2.0...0.2.1
 [0.2.0]: https://github.com/Saesentsessis/Unity-Data-Shards/compare/0.1.0...0.2.0
 [0.1.0]: https://github.com/Saesentsessis/Unity-Data-Shards/releases/tag/0.1.0

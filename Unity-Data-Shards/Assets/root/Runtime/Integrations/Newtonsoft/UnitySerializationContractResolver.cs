@@ -6,7 +6,7 @@ using Newtonsoft.Json;
 using Newtonsoft.Json.Serialization;
 using UnityEngine;
 
-namespace Persistence.Serialization.Newtonsoft
+namespace Saesentsessis.Persistence.Serialization.Newtonsoft
 {
 	/// <summary>
 	/// Makes Newtonsoft serialize the same members <see cref="UnityEngine.JsonUtility"/> does, so a

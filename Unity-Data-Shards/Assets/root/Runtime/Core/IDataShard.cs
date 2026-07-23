@@ -1,6 +1,6 @@
 ﻿using System;
 
-namespace Persistence.Core
+namespace Saesentsessis.Persistence.Core
 {
 	/// <summary>
 	/// Atomic unit of save data identified by a stable GUID.

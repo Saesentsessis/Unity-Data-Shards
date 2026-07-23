@@ -4,17 +4,17 @@ using System.Threading;
 #if PERSISTENCE_HAS_UNITASK
 using TaskType = Cysharp.Threading.Tasks.UniTask;
 using BoolTask = Cysharp.Threading.Tasks.UniTask<bool>;
-using SaveLayoutTask = Cysharp.Threading.Tasks.UniTask<Persistence.Layout.SaveLayoutResult>;
+using SaveLayoutTask = Cysharp.Threading.Tasks.UniTask<Saesentsessis.Persistence.Layout.SaveLayoutResult>;
 #else
 using TaskType = System.Threading.Tasks.Task;
 using BoolTask = System.Threading.Tasks.Task<bool>;
-using SaveLayoutTask = System.Threading.Tasks.Task<Persistence.Layout.SaveLayoutResult>;
+using SaveLayoutTask = System.Threading.Tasks.Task<Saesentsessis.Persistence.Layout.SaveLayoutResult>;
 #endif
-using Persistence.Buffers;
-using Persistence.Core;
+using Saesentsessis.Persistence.Buffers;
+using Saesentsessis.Persistence.Core;
 using Unity.Collections;
 
-namespace Persistence.Layout
+namespace Saesentsessis.Persistence.Layout
 {
 	/// <summary>
 	/// Packs the envelope, blob ranges and the payload arena into ONE storage key:

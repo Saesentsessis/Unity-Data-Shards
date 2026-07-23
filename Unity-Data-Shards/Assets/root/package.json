@@ -14,7 +14,7 @@
         "unitask",
         "migration"
     ],
-    "version": "0.2.1",
+    "version": "0.3.0",
     "unity": "2022.3",
     "description": "Performance-first save-system abstraction: GUID-identified data shards flowing through a zero-copy arena pipeline into pluggable serializers, layouts, and storage backends. Incremental saves, xxHash3-checksummed envelopes, blob-level schema migrations.",
     "dependencies": {

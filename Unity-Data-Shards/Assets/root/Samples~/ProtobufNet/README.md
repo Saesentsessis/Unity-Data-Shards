@@ -18,10 +18,10 @@ Ensure `protobuf-net.dll` (and `protobuf-net.Core.dll`) is marked **Auto Referen
 ## Usage
 
 ```csharp
-using Persistence;
-using Persistence.Layout;
-using Persistence.Serialization.ProtobufNet;
-using Persistence.Storage;
+using Saesentsessis.Persistence;
+using Saesentsessis.Persistence.Layout;
+using Saesentsessis.Persistence.Serialization.ProtobufNet;
+using Saesentsessis.Persistence.Storage;
 
 var serializer = new ProtobufNetSerializer();
 var manager = new SaveManager(serializer, new SingleFileSaveLayout(new FileStorage()));

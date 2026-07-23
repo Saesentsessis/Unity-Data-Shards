@@ -1,7 +1,7 @@
 using System;
 using System.Buffers;
 
-namespace Persistence.Core
+namespace Saesentsessis.Persistence.Core
 {
     /// <summary>
     /// Converts objects to/from raw bytes. Implementations choose the wire format

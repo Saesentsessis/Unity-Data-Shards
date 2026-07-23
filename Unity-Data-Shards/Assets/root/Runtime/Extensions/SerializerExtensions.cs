@@ -1,8 +1,8 @@
 using System;
 using System.Buffers;
-using Persistence.Core;
+using Saesentsessis.Persistence.Core;
 
-namespace Persistence
+namespace Saesentsessis.Persistence
 {
     public static class SerializerExtensions
     {

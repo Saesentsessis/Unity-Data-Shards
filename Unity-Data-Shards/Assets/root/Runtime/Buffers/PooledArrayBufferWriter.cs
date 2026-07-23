@@ -2,7 +2,7 @@ using System;
 using System.Buffers;
 using System.Runtime.CompilerServices;
 
-namespace Persistence.Buffers
+namespace Saesentsessis.Persistence.Buffers
 {
 	/// <summary>
 	/// <see cref="IBufferWriter{T}"/> over <see cref="ArrayPool{T}"/> — the managed
@@ -12,13 +12,14 @@ namespace Persistence.Buffers
 	public sealed class PooledArrayBufferWriter : IArenaWriter, IDisposable
 	{
 		private const int DefaultChunkSize = 256;
+		private static readonly ArrayPool<byte> Pool = ArrayPool<byte>.Shared;
 
 		private byte[] _buffer;
 		private int _written;
 
 		public PooledArrayBufferWriter(int initialCapacity = 4096)
 		{
-			_buffer = ArrayPool<byte>.Shared.Rent(initialCapacity);
+			_buffer = Pool.Rent(initialCapacity);
 		}
 
 		public int WrittenLength
@@ -68,7 +69,7 @@ namespace Persistence.Buffers
 			if (_buffer == null)
 				return;
 
-			ArrayPool<byte>.Shared.Return(_buffer);
+			Pool.Return(_buffer);
 			_buffer = null;
 		}
 
@@ -87,9 +88,9 @@ namespace Persistence.Buffers
 			if (newCapacity < required)
 				newCapacity = required;
 
-			var next = ArrayPool<byte>.Shared.Rent(newCapacity);
+			var next = Pool.Rent(newCapacity);
 			Buffer.BlockCopy(_buffer, 0, next, 0, _written);
-			ArrayPool<byte>.Shared.Return(_buffer);
+			Pool.Return(_buffer);
 			_buffer = next;
 		}
 	}

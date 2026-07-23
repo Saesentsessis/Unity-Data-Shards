@@ -2,12 +2,12 @@ using System;
 using System.Collections;
 using System.Linq;
 using NUnit.Framework;
-using Persistence.Core;
-using Persistence.Layout;
-using Persistence.Serialization;
+using Saesentsessis.Persistence.Core;
+using Saesentsessis.Persistence.Layout;
+using Saesentsessis.Persistence.Serialization;
 using UnityEngine.TestTools;
 
-namespace Persistence.Tests
+namespace Saesentsessis.Persistence.Tests
 {
 	public class MultiFileLayoutTests
 	{

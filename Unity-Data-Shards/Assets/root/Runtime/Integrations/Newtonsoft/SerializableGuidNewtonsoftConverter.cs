@@ -1,9 +1,9 @@
 #if PERSISTENCE_HAS_NEWTONSOFT
 using System;
 using Newtonsoft.Json;
-using Persistence.Core;
+using Saesentsessis.Persistence.Core;
 
-namespace Persistence.Serialization.Newtonsoft
+namespace Saesentsessis.Persistence.Serialization.Newtonsoft
 {
 	/// <summary>
 	/// Writes <see cref="SerializableGuid"/> as its 32-char "N" hex string. Newtonsoft has no

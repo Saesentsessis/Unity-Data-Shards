@@ -3,12 +3,12 @@ using System;
 using System.Collections;
 using System.Text;
 using NUnit.Framework;
-using Persistence.Core;
-using Persistence.Layout;
-using Persistence.Serialization.Newtonsoft;
+using Saesentsessis.Persistence.Core;
+using Saesentsessis.Persistence.Layout;
+using Saesentsessis.Persistence.Serialization.Newtonsoft;
 using UnityEngine.TestTools;
 
-namespace Persistence.Tests
+namespace Saesentsessis.Persistence.Tests
 {
 	public class NewtonsoftSerializerTests
 	{
@@ -39,7 +39,7 @@ namespace Persistence.Tests
 			var id = Guid.NewGuid();
 			var shard = new TestShard(id, 1, "x");
 
-			using var writer = new Persistence.Buffers.PooledArrayBufferWriter();
+			using var writer = new Saesentsessis.Persistence.Buffers.PooledArrayBufferWriter();
 			serializer.Serialize(shard, shard.GetType(), writer);
 			var json = Encoding.UTF8.GetString(writer.WrittenSpan);
 

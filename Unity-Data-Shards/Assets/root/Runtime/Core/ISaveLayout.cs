@@ -1,17 +1,17 @@
 using System.Threading;
-using Persistence.Layout;
+using Saesentsessis.Persistence.Layout;
 using Unity.Collections;
 #if PERSISTENCE_HAS_UNITASK
 using TaskType = Cysharp.Threading.Tasks.UniTask;
 using BoolTask = Cysharp.Threading.Tasks.UniTask<bool>;
-using SaveLayoutTask = Cysharp.Threading.Tasks.UniTask<Persistence.Layout.SaveLayoutResult>;
+using SaveLayoutTask = Cysharp.Threading.Tasks.UniTask<Saesentsessis.Persistence.Layout.SaveLayoutResult>;
 #else
 using TaskType = System.Threading.Tasks.Task;
 using BoolTask = System.Threading.Tasks.Task<bool>;
-using SaveLayoutTask = System.Threading.Tasks.Task<Persistence.Layout.SaveLayoutResult>;
+using SaveLayoutTask = System.Threading.Tasks.Task<Saesentsessis.Persistence.Layout.SaveLayoutResult>;
 #endif
 
-namespace Persistence.Core
+namespace Saesentsessis.Persistence.Core
 {
 	/// <summary>
 	/// Defines how serialized shard blobs are organized on storage. Implementations

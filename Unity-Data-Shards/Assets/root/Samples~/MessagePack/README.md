@@ -19,10 +19,10 @@ Ensure the `MessagePack.dll` (and `MessagePack.Annotations.dll`) is **Auto Refer
 ## Usage
 
 ```csharp
-using Persistence;
-using Persistence.Layout;
-using Persistence.Serialization.MessagePack;
-using Persistence.Storage;
+using Saesentsessis.Persistence;
+using Saesentsessis.Persistence.Layout;
+using Saesentsessis.Persistence.Serialization.MessagePack;
+using Saesentsessis.Persistence.Storage;
 
 var serializer = new MessagePackShardSerializer();
 var manager = new SaveManager(serializer, new SingleFileSaveLayout(new FileStorage()));

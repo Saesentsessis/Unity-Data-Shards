@@ -1,9 +1,9 @@
 using System.Runtime.CompilerServices;
-using Persistence.Core;
+using Saesentsessis.Persistence.Core;
 using Unity.Burst;
 using Unity.Collections.LowLevel.Unsafe;
 
-namespace Persistence
+namespace Saesentsessis.Persistence
 {
 	[BurstCompile]
 	public static partial class UnsafeStringUtils

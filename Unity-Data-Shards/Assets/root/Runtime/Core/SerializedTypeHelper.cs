@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Concurrent;
-using Persistence.Layout;
+using Saesentsessis.Persistence.Layout;
 
-namespace Persistence.Core
+namespace Saesentsessis.Persistence.Core
 {
 	/// <summary>
 	/// Builds and resolves <see cref="SerializedType"/> descriptors, caching both directions.

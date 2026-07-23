@@ -1,7 +1,7 @@
 using System;
 using System.Buffers;
 
-namespace Persistence.Core
+namespace Saesentsessis.Persistence.Core
 {
 	/// <summary>
 	/// A reversible byte-level transform (compression, encryption, ...) applied to the

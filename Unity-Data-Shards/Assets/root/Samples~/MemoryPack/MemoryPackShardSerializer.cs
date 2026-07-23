@@ -1,9 +1,9 @@
 using System;
 using System.Buffers;
 using MemoryPack;
-using Persistence.Core;
+using Saesentsessis.Persistence.Core;
 
-namespace Persistence.Serialization.MemoryPack
+namespace Saesentsessis.Persistence.Serialization.MemoryPack
 {
 	/// <summary>
 	/// <see cref="ISerializer"/> backed by Cysharp's MemoryPack — a zero-encoding binary serializer

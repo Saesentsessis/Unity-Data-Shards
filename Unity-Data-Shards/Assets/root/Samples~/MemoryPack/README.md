@@ -22,7 +22,7 @@ with this serializer must be annotated:
 
 ```csharp
 using MemoryPack;
-using Persistence.Core;
+using Saesentsessis.Persistence.Core;
 
 [MemoryPackable]
 [ShardSchema(1)]
@@ -39,10 +39,10 @@ public partial class PlayerShard : IDataShard
 ## Usage
 
 ```csharp
-using Persistence;
-using Persistence.Layout;
-using Persistence.Serialization.MemoryPack;
-using Persistence.Storage;
+using Saesentsessis.Persistence;
+using Saesentsessis.Persistence.Layout;
+using Saesentsessis.Persistence.Serialization.MemoryPack;
+using Saesentsessis.Persistence.Storage;
 
 var serializer = new MemoryPackShardSerializer();
 var manager = new SaveManager(serializer, new SingleFileSaveLayout(new FileStorage()));
