@@ -16,7 +16,7 @@ namespace Saesentsessis.Persistence.Installer
     public static partial class Installer
     {
         public const string PackageId = "com.saesentsessis.unity-data-shards";
-        public const string Version = "0.2.0";
+        public const string Version = "0.2.1";
 
         static Installer()
         {
