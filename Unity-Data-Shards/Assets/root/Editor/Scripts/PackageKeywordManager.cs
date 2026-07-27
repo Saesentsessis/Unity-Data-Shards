@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using UnityEditor;
 using UnityEditor.Build;
+using UnityEngine;
 using Saesentsessis.Persistence.Utils;
 
 namespace Saesentsessis.Persistence.Editor
@@ -27,11 +28,20 @@ namespace Saesentsessis.Persistence.Editor
 
 		static PackageKeywordManager()
 		{
+			// Never touch PlayerSettings in batch mode. An automated run's compile flags must come
+			// from the project it checked out, not from a package rewriting them mid-session:
+			// changing defines requests a recompilation, and a recompilation racing the Test
+			// Runner's player build fails the whole job with "Error building Player because
+			// scripts are compiling". CI projects declare the defines they want in ProjectSettings.
+			if (Application.isBatchMode)
+				return;
+
 			EditorApplication.delayCall += LoadKeywords;
 		}
 
 		/// <summary>
-		/// Enables integrity checks the first time the package is loaded in a project.
+		/// Enables the optional checks the first time the package is loaded in a project, then
+		/// mirrors the current state onto the menu items.
 		/// </summary>
 		private static void LoadKeywords()
 		{
@@ -39,12 +49,21 @@ namespace Saesentsessis.Persistence.Editor
 
 			if (string.IsNullOrEmpty(EditorUserSettings.GetConfigValue(PersistenceIntegrityChecksSeededKey)))
 			{
+				// Seeding triggers a domain reload, so it must not land inside an import, a compile
+				// or a player build. Re-arm rather than seed now; the marker below is only written
+				// once the write actually happens, so retrying is safe.
+				if (EditorApplication.isCompiling || EditorApplication.isUpdating || BuildPipeline.isBuildingPlayer)
+				{
+					EditorApplication.delayCall += LoadKeywords;
+					return;
+				}
+
 				EditorUserSettings.SetConfigValue(PersistenceIntegrityChecksSeededKey, "1");
 
-				SetKeyword(PersistenceIntegrityChecksKeyword, true);
-				SetKeyword(PersistenceSafeConcurrencyKeyword, true);
+				// One write for both keywords: setting them separately requested two compilations.
+				SetKeywords(true, PersistenceIntegrityChecksKeyword, PersistenceSafeConcurrencyKeyword);
 			}
-			
+
 			Menu.SetChecked(TogglePersistenceIntegrityChecksPath, HasKeyword(PersistenceIntegrityChecksKeyword));
 			Menu.SetChecked(TogglePersistenceSafeConcurrencyPath, HasKeyword(PersistenceSafeConcurrencyKeyword));
 		}
@@ -81,24 +100,46 @@ namespace Saesentsessis.Persistence.Editor
 		/// <summary>
 		/// Adds or removes the keyword for the active build target.
 		/// </summary>
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		private static void SetKeyword(string keyword, bool state)
 		{
-			var symbols = GetSymbols();
-			var range = StringUtils.RangeOfKeyword(symbols, keyword);
-			
-			if (state)
-			{
-				if (range.start >= 0)
-					return;
+			SetKeywords(state, keyword);
+		}
 
-				SetSymbols(StringUtils.Join(symbols, keyword));
-				return;
+		/// <summary>
+		/// Adds or removes several keywords in a single write. Every write to the define symbols
+		/// costs a domain reload, so the whole batch is folded into one — and a batch that changes
+		/// nothing writes nothing at all.
+		/// </summary>
+		private static void SetKeywords(bool state, params string[] keywords)
+		{
+			var symbols = GetSymbols();
+			var changed = false;
+
+			foreach (var keyword in keywords)
+			{
+				var range = StringUtils.RangeOfKeyword(symbols, keyword);
+
+				if (state)
+				{
+					if (range.start >= 0)
+						continue;
+
+					symbols = StringUtils.Join(symbols, keyword);
+				}
+				else
+				{
+					if (range.start < 0)
+						continue;
+
+					symbols = StringUtils.Remove(symbols, range);
+				}
+
+				changed = true;
 			}
 
-			if (range.start < 0)
-				return;
-			
-			SetSymbols(StringUtils.Remove(symbols, range));
+			if (changed)
+				SetSymbols(symbols);
 		}
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
