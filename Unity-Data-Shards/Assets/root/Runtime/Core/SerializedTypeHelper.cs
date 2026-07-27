@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Security;
 using Saesentsessis.Persistence.Layout;
 
 namespace Saesentsessis.Persistence.Core
@@ -43,14 +44,18 @@ namespace Saesentsessis.Persistence.Core
 
 		private static Type ResolveMiss(SerializedType descriptor)
 		{
-			var result = new string(' ', descriptor.TypeName.Length + descriptor.AssemblyName.Length + 2);
-			UnsafeStringUtils.Write(result, descriptor.TypeName);
-			UnsafeStringUtils.Write(result, ',', descriptor.TypeName.Length);
-			UnsafeStringUtils.Write(result, descriptor.AssemblyName, descriptor.TypeName.Length + 1);
+			var result = descriptor.ToString();
 
 			var type = Type.GetType(result)
 				?? throw new InvalidOperationException($"Cannot resolve type '{result}'.");
 
+			// Type.GetType resolves an attacker-controlled name from the save file, so the result
+			// must be constrained before anything instantiates it. Never gated: this is the gate
+			// itself, and it costs one check per unique type per process thanks to ResolveCache.
+			if (typeof(IDataShard).IsAssignableFrom(type) == false)
+				throw new SecurityException(
+					$"Stored type '{result}' does not implement {nameof(IDataShard)} and will not be instantiated.");
+			
 			return ResolveCache.GetOrAdd(descriptor, type);
 		}
 	}

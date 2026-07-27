@@ -9,10 +9,10 @@ namespace Saesentsessis.Persistence.Core
 	/// the key has no persisted data — no exception, no extra Exists round trip.
 	/// When found, the caller owns <see cref="Data"/> and must dispose it.
 	/// </summary>
-	public readonly struct StorageReadResult
+	public struct StorageReadResult : IDisposable
 	{
 		public readonly bool Found;
-		public readonly NativeArray<byte> Data;
+		public NativeArray<byte> Data;
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public StorageReadResult(NativeArray<byte> data)
@@ -22,6 +22,11 @@ namespace Saesentsessis.Persistence.Core
 		}
 
 		public static StorageReadResult NotFound => default;
+
+		public void Dispose()
+		{
+			Data.Dispose();
+		}
 	}
 
 	/// <summary>

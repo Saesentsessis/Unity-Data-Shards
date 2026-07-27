@@ -828,7 +828,8 @@ PlayerSettings:
   webGLCloseOnQuit: 0
   webWasm2023: 0
   webEnableSubmoduleStrippingCompatibility: 0
-  scriptingDefineSymbols: {}
+  scriptingDefineSymbols:
+    Standalone: ENABLE_PERSISTENCE_INTEGRITY_CHECKS;ENABLE_PERSISTENCE_SAFE_CONCURRENCY
   additionalCompilerArguments: {}
   platformArchitecture: {}
   scriptingBackend:

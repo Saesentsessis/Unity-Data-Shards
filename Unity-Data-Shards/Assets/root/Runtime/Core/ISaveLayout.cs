@@ -1,3 +1,4 @@
+using System;
 using System.Threading;
 using Saesentsessis.Persistence.Layout;
 using Unity.Collections;
@@ -22,7 +23,7 @@ namespace Saesentsessis.Persistence.Core
 	/// via a fixed binary codec, independent of the shard serializer, and the layout
 	/// is responsible for computing/verifying the envelope checksum.
 	/// </summary>
-	public interface ISaveLayout
+	public interface ISaveLayout : IDisposable
 	{
 		/// <summary>
 		/// If true, SaveManager must provide blobs for ALL shards on every save

@@ -30,7 +30,7 @@ namespace Saesentsessis.Persistence.Tests
 		}
 
 		[UnityTest]
-		public IEnumerator RoundTrip_PreservesShardData([Values(0, 1, 10, 80)] int count) => AsyncTest.Run(async () =>
+		public IEnumerator RoundTrip_PreservesShardData([Values(0, 1, 10, 80, 1000)] int count) => AsyncTest.Run(async () =>
 		{
 			var manager = CreateManager(out var storage);
 			var store = CreateShards(count);

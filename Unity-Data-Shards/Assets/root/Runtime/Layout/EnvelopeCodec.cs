@@ -93,7 +93,8 @@ namespace Saesentsessis.Persistence.Layout
 			var version = ReadInt(data, ref offset);
 
 			if (version != SaveEnvelope.CurrentFormatVersion)
-				throw new InvalidOperationException($"Unsupported envelope version {version}, expected {SaveEnvelope.CurrentFormatVersion}.");
+				throw new SaveCorruptedException($"Unsupported envelope version {version}, expected {SaveEnvelope.CurrentFormatVersion}.",
+					SaveCorruptedExceptionReason.UnsupportedVersion);
 
 			var envelope = new SaveEnvelope
 			{
@@ -105,9 +106,10 @@ namespace Saesentsessis.Persistence.Layout
 			var typeCount = ReadInt(data, ref offset);
 
 			if ((uint)typeCount > MaxCount)
-				throw new SaveCorruptedException($"Envelope type count {typeCount} is out of range.");
+				throw new SaveCorruptedException($"Envelope type count {typeCount} is out of range.",
+					SaveCorruptedExceptionReason.TypeCountOverflow);
 
-			envelope.Types = new SerializedType[typeCount];
+			envelope.TypesArray = new SerializedType[typeCount];
 			envelope.TypeCount = typeCount;
 
 			for (var i = 0; i < typeCount; i++)
@@ -115,35 +117,38 @@ namespace Saesentsessis.Persistence.Layout
 				var typeName = ReadString(data, ref offset);
 				var assemblyName = ReadString(data, ref offset);
 				var schemaVersion = ReadInt(data, ref offset);
-				envelope.Types[i] = new SerializedType(typeName, assemblyName, schemaVersion);
+				envelope.TypesArray[i] = new SerializedType(typeName, assemblyName, schemaVersion);
 			}
 
 			var recordCount = ReadInt(data, ref offset);
 
 			if ((uint)recordCount > MaxCount)
-				throw new SaveCorruptedException($"Envelope record count {recordCount} is out of range.");
+				throw new SaveCorruptedException($"Envelope record count {recordCount} is out of range.",
+					SaveCorruptedExceptionReason.RecordCountOverflow);
 
 			// C4: the full record block size is known here — verify it fits before
 			// touching a single record.
 			if (data.Length - offset < recordCount * RecordSize)
-				throw new SaveCorruptedException($"Envelope truncated: {recordCount} records need {recordCount * RecordSize} bytes, {data.Length - offset} remain.");
+				throw new SaveCorruptedException($"Envelope truncated: {recordCount} records need {recordCount * RecordSize} bytes, {data.Length - offset} remain.",
+					SaveCorruptedExceptionReason.EnvelopeTruncated);
 
-			envelope.Records = new ShardRecord[recordCount];
+			envelope.RecordsArray = new ShardRecord[recordCount];
 			envelope.RecordCount = recordCount;
 
 			for (var i = 0; i < recordCount; i++)
 			{
 				var head = BinaryPrimitives.ReadUInt64LittleEndian(data[offset..]);
 				var tail = BinaryPrimitives.ReadUInt64LittleEndian(data[(offset + 8)..]);
-				envelope.Records[i].Id = new SerializableGuid(head, tail);
-				envelope.Records[i].TypeIndex = BinaryPrimitives.ReadInt32LittleEndian(data[(offset + 16)..]);
+				envelope.RecordsArray[i].Id = new SerializableGuid(head, tail);
+				envelope.RecordsArray[i].TypeIndex = BinaryPrimitives.ReadInt32LittleEndian(data[(offset + 16)..]);
 				offset += RecordSize;
 			}
 
 			// Every type index must point inside the type table.
 			for (var i = 0; i < recordCount; i++)
 				if ((uint)envelope.Records[i].TypeIndex >= (uint)typeCount)
-					throw new SaveCorruptedException($"Record {i} references type index {envelope.Records[i].TypeIndex}, but only {typeCount} types are stored.");
+					throw new SaveCorruptedException($"Record {i} references type index {envelope.Records[i].TypeIndex}, but only {typeCount} types are stored.",
+						SaveCorruptedExceptionReason.TypeIndexOutOfRange);
 
 			bytesConsumed = offset;
 			return envelope;
@@ -153,7 +158,8 @@ namespace Saesentsessis.Persistence.Layout
 		public static unsafe ulong ComputeChecksum(ReadOnlySpan<byte> encoded)
 		{
 			if (encoded.Length < HashedRegionOffset)
-				throw new SaveCorruptedException($"Buffer too small for an envelope header ({encoded.Length} bytes).");
+				throw new SaveCorruptedException($"Buffer too small for an envelope header ({encoded.Length} bytes).",
+					SaveCorruptedExceptionReason.EnvelopeTruncated);
 
 			var region = encoded[HashedRegionOffset..];
 
@@ -182,7 +188,8 @@ namespace Saesentsessis.Persistence.Layout
 			var stored = BinaryPrimitives.ReadUInt64LittleEndian(encoded[ChecksumOffset..]);
 
 			if (computed != stored)
-				throw new SaveCorruptedException($"Checksum mismatch: stored {stored:x16}, computed {computed:x16}. The save data is corrupted.");
+				throw new SaveCorruptedException($"Checksum mismatch: stored {stored:x16}, computed {computed:x16}. The save data is corrupted.",
+					SaveCorruptedExceptionReason.ChecksumMismatch);
 		}
 
 		private static void WriteInt(IBufferWriter<byte> writer, int value)
@@ -205,7 +212,8 @@ namespace Saesentsessis.Persistence.Layout
 		private static int ReadInt(ReadOnlySpan<byte> data, ref int offset)
 		{
 			if (data.Length - offset < 4)
-				throw new SaveCorruptedException($"Envelope truncated at offset {offset} (need 4 bytes, {data.Length - offset} remain).");
+				throw new SaveCorruptedException($"Envelope truncated at offset {offset} (need 4 bytes, {data.Length - offset} remain).",
+					SaveCorruptedExceptionReason.EnvelopeTruncated);
 
 			var value = BinaryPrimitives.ReadInt32LittleEndian(data[offset..]);
 			offset += 4;
@@ -215,7 +223,8 @@ namespace Saesentsessis.Persistence.Layout
 		private static long ReadLong(ReadOnlySpan<byte> data, ref int offset)
 		{
 			if (data.Length - offset < 8)
-				throw new SaveCorruptedException($"Envelope truncated at offset {offset} (need 8 bytes, {data.Length - offset} remain).");
+				throw new SaveCorruptedException($"Envelope truncated at offset {offset} (need 8 bytes, {data.Length - offset} remain).",
+					SaveCorruptedExceptionReason.EnvelopeTruncated);
 
 			var value = BinaryPrimitives.ReadInt64LittleEndian(data[offset..]);
 			offset += 8;
@@ -225,7 +234,8 @@ namespace Saesentsessis.Persistence.Layout
 		private static ulong ReadULong(ReadOnlySpan<byte> data, ref int offset)
 		{
 			if (data.Length - offset < 8)
-				throw new SaveCorruptedException($"Envelope truncated at offset {offset} (need 8 bytes, {data.Length - offset} remain).");
+				throw new SaveCorruptedException($"Envelope truncated at offset {offset} (need 8 bytes, {data.Length - offset} remain).",
+					SaveCorruptedExceptionReason.EnvelopeTruncated);
 
 			var value = BinaryPrimitives.ReadUInt64LittleEndian(data[offset..]);
 			offset += 8;
@@ -237,10 +247,12 @@ namespace Saesentsessis.Persistence.Layout
 			var byteCount = ReadInt(data, ref offset);
 
 			if ((uint)byteCount > MaxStringBytes)
-				throw new SaveCorruptedException($"Envelope string length {byteCount} at offset {offset} is out of range.");
+				throw new SaveCorruptedException($"Envelope string length {byteCount} at offset {offset} is out of range.",
+					SaveCorruptedExceptionReason.EnvelopeTruncated);
 
 			if (data.Length - offset < byteCount)
-				throw new SaveCorruptedException($"Envelope truncated at offset {offset} (need {byteCount} bytes, {data.Length - offset} remain).");
+				throw new SaveCorruptedException($"Envelope truncated at offset {offset} (need {byteCount} bytes, {data.Length - offset} remain).",
+					SaveCorruptedExceptionReason.EnvelopeTruncated);
 
 			var value = Utf8.GetString(data.Slice(offset, byteCount));
 			offset += byteCount;

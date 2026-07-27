@@ -46,5 +46,19 @@ namespace Saesentsessis.Persistence.Layout
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public static bool operator !=(SerializedType left, SerializedType right) => !left.Equals(right);
+
+		public override string ToString()
+		{
+			var totalLength = TypeName.Length + AssemblyName.Length + 2;
+
+			return string.Create(totalLength, (TypeName, AssemblyName), static (span, state) =>
+			{
+				state.TypeName.AsSpan().CopyTo(span);
+				var offset = state.TypeName.Length - 1;
+				span[++offset] = ',';
+				span[++offset] = ' ';
+				state.AssemblyName.AsSpan().CopyTo(span[++offset..]);
+			});
+		}
 	}
 }

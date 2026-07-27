@@ -1,4 +1,7 @@
 using System;
+#if ENABLE_PERSISTENCE_SAFE_CONCURRENCY
+using System.Collections.Concurrent;
+#endif
 using System.Collections.Generic;
 using System.Threading;
 using Saesentsessis.Persistence.Core;
@@ -25,20 +28,33 @@ namespace Saesentsessis.Persistence.Storage
 	public sealed class PlayerPrefsStorage : IStorage
 	{
 		private readonly string _postfix;
+#if ENABLE_PERSISTENCE_SAFE_CONCURRENCY
+		private readonly ConcurrentDictionary<string, string> _keyCache;
+#else
 		private readonly Dictionary<string, string> _keyCache;
+#endif
 
 		public PlayerPrefsStorage(string postfix = null)
 		{
 			_postfix = postfix ?? string.Empty;
+#if ENABLE_PERSISTENCE_SAFE_CONCURRENCY
+			_keyCache = _postfix.Length > 0 ? new ConcurrentDictionary<string, string>() : null;
+#else
 			_keyCache = _postfix.Length > 0 ? new Dictionary<string, string>() : null;
+#endif
 		}
 
 		public StorageReadTask TryReadAsync(string key, Allocator allocator, CancellationToken cancellation = default)
 		{
+			var resolvedKey = ResolveKey(key);
+
+			if (PlayerPrefs.HasKey(resolvedKey) == false)
+				return PersistenceTask.FromResult(StorageReadResult.NotFound);
+			
 			var base64 = PlayerPrefs.GetString(ResolveKey(key));
 
 			if (string.IsNullOrEmpty(base64))
-				return PersistenceTask.FromResult(StorageReadResult.NotFound);
+				return PersistenceTask.FromResult(new StorageReadResult(default));
 
 			unsafe
 			{
@@ -110,6 +126,11 @@ namespace Saesentsessis.Persistence.Storage
 		private string BuildKey(string key)
 		{
 			return key + _postfix;
+		}
+
+		public void Dispose()
+		{
+			_keyCache.Clear();
 		}
 	}
 }
