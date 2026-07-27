@@ -1,6 +1,7 @@
 using System;
 using System.Buffers;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 
 namespace Saesentsessis.Persistence.Layout
 {
@@ -9,16 +10,15 @@ namespace Saesentsessis.Persistence.Layout
 	/// from <see cref="ArrayPool{T}"/> (they can be longer than the logical counts);
 	/// <see cref="Dispose"/> returns pooled arrays when <c>pooled</c> was set.
 	/// </summary>
+	[StructLayout(LayoutKind.Sequential)]
 	public struct ManagedSaveLayoutResult : IDisposable
 	{
 		public SaveEnvelope Envelope;
 		public byte[] Payload;
-		public int PayloadLength;
 		public ShardBlobRange[] Ranges;
-		public int RangeCount;
-
-		private readonly bool _pooled;
-
+		public int PayloadLength;
+		private uint _rangeCount;
+		
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public ManagedSaveLayoutResult(in SaveEnvelope envelope, byte[] payload, int payloadLength,
 			ShardBlobRange[] ranges, int rangeCount, bool pooled)
@@ -27,13 +27,36 @@ namespace Saesentsessis.Persistence.Layout
 			Payload = payload;
 			PayloadLength = payloadLength;
 			Ranges = ranges;
-			RangeCount = rangeCount;
-			_pooled = pooled;
+			_rangeCount = (uint)rangeCount;
+			
+			if (pooled)
+				_rangeCount |= 0x80000000;
+			else
+				_rangeCount &= 0x7FFFFFFF;
 		}
+		
+		public int RangeCount
+		{
+			[MethodImpl(MethodImplOptions.AggressiveInlining)]
+			get => (int)_rangeCount & 0x7FFFFFFF;
+			[MethodImpl(MethodImplOptions.AggressiveInlining)]
+			set
+			{
+				var pooled = IsPooled;
+				_rangeCount = (uint)value;
+				
+				if (pooled)
+					_rangeCount |= 0x80000000;
+				else
+					_rangeCount &= 0x7FFFFFFF;
+			}
+		}
+
+		private bool IsPooled => _rangeCount >> 31 > 0;
 
 		public void Dispose()
 		{
-			if (!_pooled)
+			if (!IsPooled)
 				return;
 
 			if (Payload != null)

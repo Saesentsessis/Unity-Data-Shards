@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics;
 using Saesentsessis.Persistence.Core;
 using Unity.Collections;
 using UnityEngine;
@@ -15,7 +16,7 @@ namespace Saesentsessis.Persistence
 	/// can be wrapped back into one via <c>AsShardStore()</c>.
 	/// </summary>
 	[Serializable]
-	public sealed class ShardStore : IReadOnlyList<IDataShard>, ISerializationCallbackReceiver
+	public sealed class ShardStore : IReadOnlyList<IDataShard>, ISerializationCallbackReceiver, IDisposable
 	{
 		[SerializeReference] private List<IDataShard> shards;
 
@@ -47,9 +48,8 @@ namespace Saesentsessis.Persistence
 			_index = new Dictionary<SerializableGuid, IDataShard>(count);
 
 			for (var i = 0; i < count; i++)
-				if (!Add(source[i]))
-					throw new ArgumentException(
-						$"Duplicate shard id {source[i].Identifier} in source list.", nameof(source));
+				if (Add(source[i]) == false)
+					throw new ArgumentException($"Duplicate shard id {source[i].Identifier} in source list.", nameof(source));
 		}
 
 		public int Count => shards.Count;
@@ -144,12 +144,20 @@ namespace Saesentsessis.Persistence
 			Generation++;
 		}
 
+		[Conditional("ENABLE_PERSISTENCE_INTEGRITY_CHECKS")]
 		private static void ThrowIfValueType(IDataShard shard)
 		{
 			if (shard.GetType().IsValueType)
 				throw new ArgumentException(
 					$"IDataShard implementations must be classes. '{shard.GetType().Name}' is a value type.",
 					nameof(shard));
+		}
+
+		public void Dispose()
+		{
+			foreach (var shard in shards)
+				if (shard is IDisposable disposableShard)
+					disposableShard.Dispose();
 		}
 	}
 }

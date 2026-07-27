@@ -17,7 +17,7 @@ namespace Saesentsessis.Persistence.Core
 	/// Managed-memory counterpart of <see cref="ISaveLayout"/>. Identical arena +
 	/// ranges model, backed by GC-tracked (pooled) buffers.
 	/// </summary>
-	public interface IManagedSaveLayout
+	public interface IManagedSaveLayout : IDisposable
 	{
 		/// <summary>
 		/// If true, SaveManager must provide blobs for ALL shards on every save.

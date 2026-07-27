@@ -421,6 +421,25 @@ no extra `Exists` round trip.
 - With background serialization, the pipeline hops to the thread pool for the CPU-heavy
 work and always returns to the main thread before invoking layouts/storages — including
 on exception and cancellation paths.
+- `SaveManager`, `ShardStore`, storages and layouts implement `IDisposable`. Disposing a
+`SaveManager` cascades to its layout and the storage that layout wraps, so a single
+`using var manager = …` releases the whole chain; `ShardStore.Dispose` in turn disposes
+any shard that is itself `IDisposable`. A `StorageReadResult` returned by a custom
+`IStorage` owns a `NativeArray` and must be disposed by whoever consumes it.
+
+### 4. Safety Checks (optional)
+
+Two editor toggles under **Tools ▸ Saesentsessis ▸ Persistence** gate the pipeline's
+non-essential checks behind scripting defines, so a shipping build can drop them:
+
+| Menu item | Define | Guards |
+|-----------|--------|--------|
+| Integrity Checks | `ENABLE_PERSISTENCE_INTEGRITY_CHECKS` | Programmer-error asserts on your own data — buffer capacity, envelope string limits, `FileStorage` path/key validation (e.g. rejecting `../`). |
+| Safe Concurrency | `ENABLE_PERSISTENCE_SAFE_CONCURRENCY` | Concurrency guards inside the storage backends. |
+
+Both default to **on** the first time the package loads in a project (recorded per-project,
+so a deliberate opt-out sticks). Validation of **untrusted data read from disk** — checksums,
+bounds, type-resolution — is *never* gated and runs in every build.
 
 ## Async Backend (UniTask optional)
 
@@ -453,8 +472,28 @@ Or manually add the scoped registry to your `Packages/manifest.json`:
 ```json
 {
   "dependencies": {
-    "com.cysharp.unitask": "2.3.3",
-    "com.saesentsessis.unity-data-shards": "0.1.0"
+    "com.saesentsessis.unity-data-shards": "0.3.1"
+  },
+  "scopedRegistries": [
+    {
+      "name": "OpenUPM",
+      "url": "https://package.openupm.com",
+      "scopes": [
+        "com.saesentsessis"
+      ]
+    }
+  ]
+}
+```
+
+It is also recommended (but not required) to install a `com.cysharp.unitask` package, as it provides zero-allocation
+awaits workflow inside Unity context:
+
+```json
+{
+  "dependencies": {
+    "com.saesentsessis.unity-data-shards": "0.3.1",
+    "com.cysharp.unitask": "2.0.0"
   },
   "scopedRegistries": [
     {
@@ -472,7 +511,7 @@ Or manually add the scoped registry to your `Packages/manifest.json`:
 ### Method 2: Unity package installer
 
 1. Download the latest `.unitypackage` from [GitHub Releases page](https://github.com/Saesentsessis/Unity-Data-Shards/releases).
-   - _Direct Link:_ [Unity-Data-Shards-Installer.unitypackage](https://github.com/Saesentsessis/Unity-Data-Shards/releases/download/0.3.0/Unity-Data-Shards-Installer.unitypackage)
+   - _Direct Link:_ [Unity-Data-Shards-Installer.unitypackage](https://github.com/Saesentsessis/Unity-Data-Shards/releases/download/0.3.1/Unity-Data-Shards-Installer.unitypackage)
 2. Import the downloaded package into your Unity project.
 3. The installer will automatically configure OpenUPM in your `manifest.json` file and install the package dependencies.
 
@@ -493,7 +532,7 @@ Or manually add the scoped registry to your `Packages/manifest.json`:
 You can specify exact release version of this package like this:
 
 ```
-https://github.com/Saesentsessis/Unity-Data-Shards.git?path=Unity-Data-Shards/Assets/root#0.3.0
+https://github.com/Saesentsessis/Unity-Data-Shards.git?path=Unity-Data-Shards/Assets/root#0.3.1
 ```
 
 ## Credits

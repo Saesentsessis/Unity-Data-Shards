@@ -12,7 +12,9 @@ using SaveLayoutTask = System.Threading.Tasks.Task<Saesentsessis.Persistence.Lay
 #endif
 using Saesentsessis.Persistence.Buffers;
 using Saesentsessis.Persistence.Core;
+using Saesentsessis.Persistence.Utils;
 using Unity.Collections;
+using Unity.Mathematics;
 
 namespace Saesentsessis.Persistence.Layout
 {
@@ -56,14 +58,13 @@ namespace Saesentsessis.Persistence.Layout
 
 			// One scratch arena reused for every shard file and the envelope; each write
 			// is awaited before the next mutation, satisfying the IStorage lifetime rule.
-			var scratch = new NativeListBufferWriter(HashPrefixSize + Math.Max(maxBlobLength, 256), Allocator.Persistent);
+			var scratch = new NativeListBufferWriter(HashPrefixSize + math.max(maxBlobLength, 256), Allocator.Persistent);
 
 			try
 			{
 				// Shard files first — the envelope below is the commit point.
-				for (var i = 0; i < ranges.Length; i++)
+				foreach (var range in ranges)
 				{
-					var range = ranges[i];
 					FrameShardFile(payload, range, scratch);
 					await _storage.WriteAsync(BuildShardKey(slot, range.Id), scratch.AsArray(), cancellation);
 				}
@@ -104,25 +105,28 @@ namespace Saesentsessis.Persistence.Layout
 			try
 			{
 				long totalLength = 0;
-
+				
 				for (var i = 0; i < count; i++)
 				{
 					var record = envelope.Records[i];
 					var read = await _storage.TryReadAsync(BuildShardKey(slot, record.Id), Allocator.Persistent, cancellation);
 
 					if (!read.Found)
-						throw new SaveCorruptedException($"Shard file missing for record {i} ({record.Id}) in slot '{slot}'.");
+						throw new SaveCorruptedException($"Shard file missing for record {i} ({record.Id}) in slot '{slot}'.",
+							SaveCorruptedExceptionReason.MissingFile);
 
 					files[i] = read.Data;
 
 					if (read.Data.Length < HashPrefixSize)
-						throw new SaveCorruptedException($"Shard file for record {i} is {read.Data.Length} bytes — smaller than its {HashPrefixSize}-byte checksum prefix.");
+						throw new SaveCorruptedException($"Shard file for record {i} is {read.Data.Length} bytes — smaller than its {HashPrefixSize}-byte checksum prefix.",
+							SaveCorruptedExceptionReason.EnvelopeTruncated);
 
 					totalLength += read.Data.Length - HashPrefixSize;
 				}
 
 				if (totalLength > int.MaxValue)
-					throw new SaveCorruptedException($"Combined shard payload of {totalLength} bytes exceeds the 2 GB arena limit.");
+					throw new SaveCorruptedException($"Combined shard payload of {totalLength} bytes exceeds the 2 GB arena limit.",
+						SaveCorruptedExceptionReason.FileIsTooLarge);
 
 				return Assemble(envelope, files, (int)totalLength, allocator);
 			}
@@ -159,7 +163,7 @@ namespace Saesentsessis.Persistence.Layout
 			}
 			finally
 			{
-				envelopeRead.Data.Dispose();
+				envelopeRead.Dispose();
 			}
 
 			if (envelopeReadable)
@@ -168,8 +172,6 @@ namespace Saesentsessis.Persistence.Layout
 
 			await _storage.DeleteAsync(slot, cancellation);
 		}
-
-		// Spans are forbidden in async methods; all buffer work lives in sync helpers.
 
 		private static void FrameShardFile(NativeArray<byte> payload, in ShardBlobRange range, NativeListBufferWriter scratch)
 		{
@@ -196,10 +198,11 @@ namespace Saesentsessis.Persistence.Layout
 			EnvelopeCodec.ValidateChecksum(span);
 			var envelope = EnvelopeCodec.Read(span, out var consumed);
 
-			if (consumed != span.Length)
-				throw new SaveCorruptedException($"Envelope file has {span.Length - consumed} unexpected trailing bytes.");
-
-			return envelope;
+			if (consumed == span.Length)
+				return envelope;
+			
+			throw new SaveCorruptedException($"Envelope file has {span.Length - consumed} unexpected trailing bytes.",
+					SaveCorruptedExceptionReason.EnvelopeIsTooLarge);
 		}
 
 		private static SaveLayoutResult Assemble(in SaveEnvelope envelope, NativeArray<byte>[] files, int totalLength, Allocator allocator)
@@ -219,7 +222,8 @@ namespace Saesentsessis.Persistence.Layout
 					var blob = file[HashPrefixSize..];
 
 					if (storedHash != Hash(blob))
-						throw new SaveCorruptedException($"Shard file checksum mismatch for record {i} ({envelope.Records[i].Id}).");
+						throw new SaveCorruptedException($"Shard file checksum mismatch for record {i} ({envelope.Records[i].Id}).",
+							SaveCorruptedExceptionReason.ChecksumMismatch);
 
 					blob.CopyTo(payload.AsSpan().Slice(offset, blob.Length));
 					ranges[i] = new ShardBlobRange(envelope.Records[i].Id, offset, blob.Length);
@@ -237,20 +241,17 @@ namespace Saesentsessis.Persistence.Layout
 		}
 
 		/// <summary>
-		/// Builds <c>slot/&lt;32-char-guid-hex&gt;</c>. Always a FRESH string instance:
-		/// storages cache keys in dictionaries, and mutating a string that already sits
-		/// in a dictionary poisons its hash bucket. Mutation happens only before the key
-		/// escapes this method.
+		/// Builds <c>slot/&lt;32-char-guid-hex&gt;</c>. Always a fresh string instance.
 		/// </summary>
 		private static string BuildShardKey(string slot, in SerializableGuid id)
 		{
-			var key = new string(' ', slot.Length + 33);
-
-			UnsafeStringUtils.Write(key, slot);
-			UnsafeStringUtils.Write(key, '/', slot.Length);
-			UnsafeStringUtils.Write(key, id, slot.Length + 1);
-
-			return key;
+			return string.Create(slot.Length + 33, (slot, id), static (span, state) =>
+			{
+				state.slot.AsSpan().CopyTo(span);
+				var offset = state.slot.Length - 1;
+				span[++offset] = '/';
+				UnsafeStringUtils.Write(span, state.id, ++offset);
+			});
 		}
 
 		private static unsafe ulong Hash(ReadOnlySpan<byte> data)
@@ -269,6 +270,11 @@ namespace Saesentsessis.Persistence.Layout
 				var hash = xxHash3.Hash64(ptr, data.Length);
 				return ((ulong)hash.y << 32) | hash.x;
 			}
+		}
+
+		public void Dispose()
+		{
+			_storage?.Dispose();
 		}
 	}
 }

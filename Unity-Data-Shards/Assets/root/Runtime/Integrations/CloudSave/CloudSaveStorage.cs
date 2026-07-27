@@ -1,12 +1,14 @@
 #if PERSISTENCE_HAS_CLOUDSAVE
 using System;
+#if ENABLE_PERSISTENCE_SAFE_CONCURRENCY
+using System.Collections.Concurrent;
+#endif
 using System.Collections.Generic;
 using System.Threading;
 using Saesentsessis.Persistence.Core;
 using Unity.Collections;
 using Unity.Services.Authentication;
 using Unity.Services.CloudSave;
-using Unity.Services.CloudSave.Models;
 #if PERSISTENCE_HAS_UNITASK
 using TaskType = Cysharp.Threading.Tasks.UniTask;
 using BoolTask = Cysharp.Threading.Tasks.UniTask<bool>;
@@ -35,7 +37,11 @@ namespace Saesentsessis.Persistence.Storage.CloudSave
 	public sealed class CloudSaveStorage : IStorage
 	{
 		private readonly char _reservedChar;
+#if ENABLE_PERSISTENCE_SAFE_CONCURRENCY
+		private readonly ConcurrentDictionary<string, string> _keyCache = new();
+#else
 		private readonly Dictionary<string, string> _keyCache = new();
+#endif
 
 		/// <param name="reservedChar">
 		/// Replaces <c>/</c> in incoming keys to satisfy Cloud Save's key rules. Must not appear in
@@ -127,6 +133,11 @@ namespace Saesentsessis.Persistence.Storage.CloudSave
 			var resolved = key.Replace('/', _reservedChar);
 			_keyCache[key] = resolved;
 			return resolved;
+		}
+
+		public void Dispose()
+		{
+			_keyCache.Clear();
 		}
 	}
 }

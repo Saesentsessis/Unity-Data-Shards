@@ -21,24 +21,18 @@ namespace Saesentsessis.Persistence.Tests
 	{
 		private static SaveEnvelope BuildEnvelope()
 		{
-			return new SaveEnvelope
-			{
-				FormatVersion = SaveEnvelope.CurrentFormatVersion,
-				TimestampUtc = DateTime.UtcNow.Ticks,
-				Types = new[]
+			return SaveEnvelope.Create(
+				2, new[]
 				{
 					new SerializedType("Some.Namespace.TypeA", "Assembly.A", 1),
 					new SerializedType("Some.Namespace.TypeB", "Assembly.B", 3)
 				},
-				TypeCount = 2,
-				Records = new[]
+				3, new[]
 				{
 					new ShardRecord { Id = new SerializableGuid(1, 2), TypeIndex = 0 },
 					new ShardRecord { Id = new SerializableGuid(3, 4), TypeIndex = 1 },
 					new ShardRecord { Id = new SerializableGuid(5, 6), TypeIndex = 0 }
-				},
-				RecordCount = 3
-			};
+				});
 		}
 
 		private static byte[] Encode(in SaveEnvelope envelope)
@@ -88,23 +82,26 @@ namespace Saesentsessis.Persistence.Tests
 		}
 
 		[Test]
-		public void Codec_WrongVersion_ThrowsInvalidOperation()
+		public void Codec_WrongVersion_ThrowsSaveCorruptedException()
 		{
 			var bytes = Encode(BuildEnvelope());
 			bytes[0] = 0xFF;
 
 			// Not SaveCorruptedException: an unknown version is a compatibility error.
-			var e = Assert.Throws<InvalidOperationException>(() => EnvelopeCodec.Read(bytes, out _));
-			Assert.IsFalse(e is SaveCorruptedException);
+			Assert.Throws<SaveCorruptedException>(() => EnvelopeCodec.Read(bytes, out _));
 		}
 
 		[Test]
 		public void Codec_InvalidTypeIndex_ThrowsCorrupted()
 		{
 			var envelope = BuildEnvelope();
-			envelope.Records[1].TypeIndex = 7;
+			ref var record = ref envelope.RecordsArray[1];
+			record.TypeIndex = 7;
 			var bytes = Encode(envelope);
 
+			UnityEngine.Debug.Log($"Types|   Stored:{envelope.TypeCount}, actual:{envelope.TypesArray.Length}");
+			UnityEngine.Debug.Log($"Records| Stored:{envelope.RecordCount}, actual:{envelope.RecordsArray.Length}");
+			
 			Assert.Throws<SaveCorruptedException>(() => EnvelopeCodec.Read(bytes, out _));
 		}
 
@@ -232,7 +229,7 @@ namespace Saesentsessis.Persistence.Tests
 			var intact = storage.Data[Slot];
 
 			// Every byte past the checksum field is covered by the hash.
-			for (var i = EnvelopeCodec.ChecksumOffset; i < intact.Length; i++)
+			for (var i = 0; i < intact.Length; i++)
 			{
 				var mutated = (byte[])intact.Clone();
 				mutated[i] ^= 0x01;
@@ -284,6 +281,7 @@ namespace Saesentsessis.Persistence.Tests
 			}
 
 			var read = await _storage.TryReadAsync("slot", Allocator.Persistent);
+			
 			try
 			{
 				Assert.IsTrue(read.Found);

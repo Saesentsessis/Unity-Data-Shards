@@ -88,9 +88,8 @@ namespace Saesentsessis.Persistence.Layout
 			BinaryPrimitives.WriteInt32LittleEndian(span, ranges.Length);
 			var offset = 4;
 
-			for (var i = 0; i < ranges.Length; i++)
+			foreach (var range in ranges)
 			{
-				var range = ranges[i];
 				BinaryPrimitives.WriteUInt64LittleEndian(span[offset..], range.Id.Head);
 				BinaryPrimitives.WriteUInt64LittleEndian(span[(offset + 8)..], range.Id.Tail);
 				BinaryPrimitives.WriteInt32LittleEndian(span[(offset + 16)..], range.Offset);
@@ -105,7 +104,7 @@ namespace Saesentsessis.Persistence.Layout
 			payload.AsReadOnlySpan().CopyTo(payloadSpan[4..]);
 			writer.Advance(4 + payload.Length);
 
-			// A8: hash covers everything past the checksum field — envelope body,
+			// Hash covers everything past the checksum field — envelope body,
 			// ranges and payload alike.
 			EnvelopeCodec.PatchChecksum(writer.AsArray().AsSpan());
 		}
@@ -122,10 +121,12 @@ namespace Saesentsessis.Persistence.Layout
 			var rangeCount = ReadInt(span, ref offset);
 
 			if (rangeCount != envelope.RecordCount)
-				throw new SaveCorruptedException($"Range count {rangeCount} does not match record count {envelope.RecordCount}.");
+				throw new SaveCorruptedException($"Range count {rangeCount} does not match record count {envelope.RecordCount}.",
+					SaveCorruptedExceptionReason.RecordCountOverflow);
 
 			if (span.Length - offset < rangeCount * RangeSize)
-				throw new SaveCorruptedException($"Save truncated: {rangeCount} ranges need {rangeCount * RangeSize} bytes, {span.Length - offset} remain.");
+				throw new SaveCorruptedException($"Save truncated: {rangeCount} ranges need {rangeCount * RangeSize} bytes, {span.Length - offset} remain.",
+					SaveCorruptedExceptionReason.TruncatedFile);
 
 			var ranges = new NativeArray<ShardBlobRange>(rangeCount, allocator, NativeArrayOptions.UninitializedMemory);
 
@@ -146,7 +147,8 @@ namespace Saesentsessis.Persistence.Layout
 				var payloadLength = ReadInt(span, ref offset);
 
 				if (payloadLength < 0 || span.Length - offset < payloadLength)
-					throw new SaveCorruptedException($"Save truncated: payload of {payloadLength} bytes declared, {span.Length - offset} remain.");
+					throw new SaveCorruptedException($"Save truncated: payload of {payloadLength} bytes declared, {span.Length - offset} remain.",
+						SaveCorruptedExceptionReason.TruncatedFile);
 
 				// Every range must land inside the payload.
 				for (var i = 0; i < rangeCount; i++)
@@ -154,7 +156,8 @@ namespace Saesentsessis.Persistence.Layout
 					var range = ranges[i];
 
 					if (range.Offset < 0 || range.Length < 0 || (long)range.Offset + range.Length > payloadLength)
-						throw new SaveCorruptedException($"Blob range {i} [{range.Offset}, {range.Offset + range.Length}) exceeds payload of {payloadLength} bytes.");
+						throw new SaveCorruptedException($"Blob range {i} [{range.Offset}, {range.Offset + range.Length}) exceeds payload of {payloadLength} bytes.",
+							SaveCorruptedExceptionReason.TruncatedFile);
 				}
 
 				var payload = new NativeArray<byte>(payloadLength, allocator, NativeArrayOptions.UninitializedMemory);
@@ -172,11 +175,17 @@ namespace Saesentsessis.Persistence.Layout
 		private static int ReadInt(ReadOnlySpan<byte> data, ref int offset)
 		{
 			if (data.Length - offset < 4)
-				throw new SaveCorruptedException($"Save truncated at offset {offset}.");
+				throw new SaveCorruptedException($"Save truncated at offset {offset}.",
+					SaveCorruptedExceptionReason.TruncatedFile);
 
 			var value = BinaryPrimitives.ReadInt32LittleEndian(data[offset..]);
 			offset += 4;
 			return value;
+		}
+
+		public void Dispose()
+		{
+			_storage?.Dispose();
 		}
 	}
 }

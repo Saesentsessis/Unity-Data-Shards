@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-07-25
+
+### Added
+
+- Toggleable integrity safety checks inside pipeline. All optional validation may be disabled by toggling `Tools/Saesentsessis/Persistence/Integrity Checks` menu item.
+- Toggleable safe concurrency checks inside pipeline. All safe concurrency may be disabled by toggling `Tools/Saesentsessis/Persistence/Safe Concurrency` menu item.
+- `FileStorage` now validates rootDirectory, fileExtension and keys, so they don't point out of the root directory (a key containing `../` is rejected). Gated under `ENABLE_PERSISTENCE_INTEGRITY_CHECKS`.
+- `IStorage`, `ISaveLayout`, `IManagedSaveLayout`, `StorageReadResult`, `ShardStore` and `SaveManager` now implement `IDisposable`, so a whole pipeline can be released deterministically.
+- `SaveManager` now rejects a null or empty `slot` up front on `SaveAsync`/`LoadAsync`/`ExistsAsync`/`DeleteAsync`, instead of failing deep inside a storage backend.
+- `SaveManager` now detects a record/blob-range id mismatch on load and throws `SaveCorruptedException` (`CorruptedLayout`) rather than deserializing a shard against the wrong blob.
+- `SaveCorruptedException` carries a `SaveCorruptedExceptionReason` enum describing why the save was rejected (checksum mismatch, unsupported version, truncation, count overflow, missing/too-large file, corrupted layout, …).
+
+### Fixed
+
+- **CRITICAL:** `SerializedTypeHelper.Resolve` was able to pass **any arbitrary type** when shards were deserialized, potentially causing **severe damage** to the application. Now instantiation is hard bounded to be derived from `IDataShard`.
+
+### Changed
+
+- `SerializedTypeHelper.Resolve` no longer mutates strings when hitting a new type not present inside the cache. All string data mutation is now sitting inside `SerializedType.ToString` method. No extra allocations was required.
+- `UnsafeStringUtils` is now an internal class, because CLR does not allow string mutation by design. You should avoid its usage and move to a safer alternative as `string.Create()`.
+- **BREAKING (custom layouts):** `SaveEnvelope` now exposes `Types` and `Records` as `ReadOnlySpan<>` properties over private backing arrays, built through the new `SaveEnvelope.Create` factory, rather than as public mutable array fields. Code that reads `envelope.Types` / `envelope.Records` is unaffected; code that assigned those fields directly must use `Create`.
+
 ## [0.3.0] - 2026-07-23
 
 ### Added
@@ -84,6 +106,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Tests**: round-trips (0–1000 shards, both storage backends), incremental-save dirty accounting, envelope cache reuse/invalidation, background-serialization round-trip, blob migration with type rename, broken/cyclic chain detection, codec truncation fuzzing at every byte offset, whole-file bit-flip checksum sweep, `FileStorage` crash-recovery scenarios.
 - Dependencies: `com.cysharp.unitask` 2.3.3, `com.unity.collections` 2.1.4, `com.unity.burst` 1.8.0; Unity 2022.3+.
 
+[0.3.1]: https://github.com/Saesentsessis/Unity-Data-Shards/compare/0.3.0...0.3.1
 [0.3.0]: https://github.com/Saesentsessis/Unity-Data-Shards/compare/0.2.1...0.3.0
 [0.2.1]: https://github.com/Saesentsessis/Unity-Data-Shards/compare/0.2.0...0.2.1
 [0.2.0]: https://github.com/Saesentsessis/Unity-Data-Shards/compare/0.1.0...0.2.0

@@ -10,6 +10,27 @@ namespace Saesentsessis.Persistence.Core
 	/// </summary>
 	public class SaveCorruptedException : InvalidOperationException
 	{
-		public SaveCorruptedException(string message) : base(message) { }
+		public readonly SaveCorruptedExceptionReason Reason;
+
+		public SaveCorruptedException(string message, SaveCorruptedExceptionReason reason = SaveCorruptedExceptionReason.Unknown) : base(message)
+		{
+			Reason = reason;
+		}
+	}
+
+	public enum SaveCorruptedExceptionReason
+	{
+		Unknown = 0,
+		ChecksumMismatch,
+		UnsupportedVersion,
+		EnvelopeTruncated,
+		EnvelopeIsTooLarge,
+		CorruptedLayout,
+		TypeIndexOutOfRange,
+		TypeCountOverflow,
+		RecordCountOverflow,
+		MissingFile,
+		TruncatedFile,
+		FileIsTooLarge,
 	}
 }

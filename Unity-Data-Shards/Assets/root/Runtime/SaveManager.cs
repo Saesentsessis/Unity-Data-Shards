@@ -1,6 +1,7 @@
 using System;
 using System.Buffers;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Threading;
 using Saesentsessis.Persistence.Buffers;
 using Saesentsessis.Persistence.Core;
@@ -22,15 +23,15 @@ using ShardArrayTask = System.Threading.Tasks.Task<Saesentsessis.Persistence.Cor
 
 namespace Saesentsessis.Persistence
 {
-	public sealed class SaveManager
+	public sealed class SaveManager : IDisposable
 	{
 		private const int MinArenaCapacity = 16 * 1024;
 
 		private readonly IPipeline _pipeline;
 		private readonly MigrationRegistry _migrations;
 
-		// A5: per-slot envelope cache. As long as the same ShardStore instance saves to
-		// the slot and its Generation is unchanged, the type table and records are
+		// A5: per-slot envelope cache. As long as the same ShardStore instance saves
+		// to the slot and its Generation is unchanged, the type table and records are
 		// reused verbatim — an incremental save of one dirty shard skips the whole
 		// type-dedup/record-build pass. The store is held weakly so the cache never
 		// extends shard lifetimes; entries are evicted on DeleteAsync or replacement.
@@ -62,10 +63,12 @@ namespace Saesentsessis.Persistence
 		/// </remarks>
 		public async TaskType SaveAsync(string slot, IReadOnlyList<IDataShard> shards, CancellationToken cancellation = default)
 		{
+			EnsureSlotIsValid(slot);
+
 			var count = shards.Count;
 			var fullSnapshot = _pipeline.RequiresFullSnapshot;
 
-			// C2: capture the dirty set synchronously, before any await or thread hop.
+			// Capture the dirty set synchronously, before any await or thread hop.
 			// An empty shard set skips the scan and the bit array entirely.
 			var snapshot = count > 0 ? new NativeBitArray(count, Allocator.Persistent) : default;
 			var envelope = default(SaveEnvelope);
@@ -86,7 +89,7 @@ namespace Saesentsessis.Persistence
 
 				envelope = GetOrBuildEnvelope(slot, shards, out releaseEnvelope);
 				envelope.TimestampUtc = DateTime.UtcNow.Ticks;
-
+				
 				await _pipeline.SaveAsync(slot, envelope, shards, snapshot, blobCount, cancellation);
 
 				// Success: clear dirty state only for shards that were actually captured.
@@ -106,9 +109,11 @@ namespace Saesentsessis.Persistence
 
 		public async LoadResultTask LoadAsync(string slot, CancellationToken cancellation = default)
 		{
+			EnsureSlotIsValid(slot);
+
 			var shards = await _pipeline.LoadAsync(slot, _migrations, cancellation);
 
-			for (var i = 0; i < shards.Length; i++)
+			for (var i = shards.Length - 1; i >= 0; i--)
 				shards[i].ClearDirty();
 
 			return shards;
@@ -116,11 +121,15 @@ namespace Saesentsessis.Persistence
 
 		public BoolTask ExistsAsync(string slot, CancellationToken cancellation = default)
 		{
+			EnsureSlotIsValid(slot);
+			
 			return _pipeline.ExistsAsync(slot, cancellation);
 		}
 
 		public TaskType DeleteAsync(string slot, CancellationToken cancellation = default)
 		{
+			EnsureSlotIsValid(slot);
+			
 			// The slot's persisted state is gone; drop its cached envelope with it.
 			if (_envelopeCache.Remove(slot, out var stale))
 				ReleaseEnvelope(stale.Envelope);
@@ -207,14 +216,7 @@ namespace Saesentsessis.Persistence
 				for (var i = 0; i < types.Count; i++)
 					typeArray[i] = types[i];
 
-				return new SaveEnvelope
-				{
-					FormatVersion = SaveEnvelope.CurrentFormatVersion,
-					Types = typeArray,
-					TypeCount = types.Count,
-					Records = records,
-					RecordCount = count
-				};
+				return SaveEnvelope.Create(types.Count, typeArray, count, records);
 			}
 			catch
 			{
@@ -230,12 +232,12 @@ namespace Saesentsessis.Persistence
 
 		private static void ReleaseEnvelope(in SaveEnvelope envelope)
 		{
-			if (envelope.Records != null)
-				ArrayPool<ShardRecord>.Shared.Return(envelope.Records);
+			if (envelope.RecordsArray != null)
+				ArrayPool<ShardRecord>.Shared.Return(envelope.RecordsArray);
 
 			// SerializedType holds string references — clear so the pool doesn't pin them.
-			if (envelope.Types != null)
-				ArrayPool<SerializedType>.Shared.Return(envelope.Types, clearArray: true);
+			if (envelope.TypesArray != null)
+				ArrayPool<SerializedType>.Shared.Return(envelope.TypesArray, clearArray: true);
 		}
 
 		#endregion
@@ -281,7 +283,7 @@ namespace Saesentsessis.Persistence
 
 			for (var i = 0; i < count; i++)
 			{
-				var stored = envelope.Types[i];
+				ref readonly var stored = ref envelope.Types[i];
 
 				if (migrations != null && migrations.HasMigration(stored.TypeName, stored.SchemaVersion))
 				{
@@ -319,10 +321,14 @@ namespace Saesentsessis.Persistence
 			{
 				cancellation.ThrowIfCancellationRequested();
 
-				var record = envelope.Records[i];
-				var range = ranges[i];
+				ref readonly var record = ref envelope.Records[i];
+				ref readonly var range = ref ranges[i];
 				var blob = payload.Slice(range.Offset, range.Length);
 				var typeIndex = record.TypeIndex;
+				
+				if (record.Id != range.Id)
+					throw new SaveCorruptedException($"Layout is corrupted. Expected {range.Id}({envelope.Types[typeIndex]}), got {record.Id}({envelope.Types[record.TypeIndex]}).",
+						SaveCorruptedExceptionReason.CorruptedLayout);
 
 				if (needsMigration[typeIndex])
 				{
@@ -347,7 +353,14 @@ namespace Saesentsessis.Persistence
 
 		#endregion
 
-		private interface IPipeline
+		[Conditional("ENABLE_PERSISTENCE_INTEGRITY_CHECKS")]
+		private static void EnsureSlotIsValid(string slot)
+		{
+			if (string.IsNullOrEmpty(slot))
+				throw new ArgumentNullException(nameof(slot));
+		}
+		
+		private interface IPipeline : IDisposable
 		{
 			bool RequiresFullSnapshot { get; }
 			TaskType SaveAsync(string slot, SaveEnvelope envelope, IReadOnlyList<IDataShard> shards, NativeBitArray snapshot, int blobCount, CancellationToken cancellation);
@@ -374,14 +387,15 @@ namespace Saesentsessis.Persistence
 
 			public bool RequiresFullSnapshot => _layout.RequiresFullSnapshot;
 
-			public async TaskType SaveAsync(string slot, SaveEnvelope envelope, IReadOnlyList<IDataShard> shards, NativeBitArray snapshot, int blobCount, CancellationToken cancellation)
+			public async TaskType SaveAsync(string slot, SaveEnvelope envelope, IReadOnlyList<IDataShard> shards,
+				NativeBitArray snapshot, int blobCount, CancellationToken cancellation)
 			{
 				var background = _serializer.SupportsBackgroundSerialization;
 				var capacity = ArenaCapacity(slot, blobCount);
 
 				// A1: one arena + one blittable range array per save, regardless of shard count.
 				var arena = new NativeListBufferWriter(capacity, Allocator.Persistent);
-				var ranges = new NativeArray<ShardBlobRange>(blobCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+				var ranges = new NativeArray<ShardBlobRange>(blobCount, Allocator.Persistent);
 
 				try
 				{
@@ -473,6 +487,12 @@ namespace Saesentsessis.Persistence
 					result.Payload.AsReadOnlySpan(), result.Ranges.AsReadOnlySpan(),
 					types, currentVersions, needsMigration, cancellation);
 			}
+
+			public void Dispose()
+			{
+				_arenaSizeHints.Clear();
+				_layout.Dispose();
+			}
 		}
 
 		private sealed class ManagedPipeline : IPipeline
@@ -489,7 +509,8 @@ namespace Saesentsessis.Persistence
 
 			public bool RequiresFullSnapshot => _layout.RequiresFullSnapshot;
 
-			public async TaskType SaveAsync(string slot, SaveEnvelope envelope, IReadOnlyList<IDataShard> shards, NativeBitArray snapshot, int blobCount, CancellationToken cancellation)
+			public async TaskType SaveAsync(string slot, SaveEnvelope envelope, IReadOnlyList<IDataShard> shards,
+				NativeBitArray snapshot, int blobCount, CancellationToken cancellation)
 			{
 				var background = _serializer.SupportsBackgroundSerialization;
 				var capacity = ArenaCapacity(slot, blobCount);
@@ -585,6 +606,18 @@ namespace Saesentsessis.Persistence
 					result.Ranges.AsSpan(0, result.RangeCount),
 					types, currentVersions, needsMigration, cancellation);
 			}
+
+			public void Dispose()
+			{
+				_arenaSizeHints.Clear();
+				_layout.Dispose();
+			}
+		}
+
+		public void Dispose()
+		{
+			_envelopeCache.Clear();
+			_pipeline.Dispose();
 		}
 	}
 }

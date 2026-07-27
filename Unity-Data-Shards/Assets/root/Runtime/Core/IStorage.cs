@@ -1,3 +1,4 @@
+using System;
 using System.Threading;
 using Unity.Collections;
 #if PERSISTENCE_HAS_UNITASK
@@ -16,7 +17,7 @@ namespace Saesentsessis.Persistence.Core
     /// Async key-value byte storage backed by unmanaged NativeArrays.
     /// Implementations handle the physical medium (filesystem, PlayerPrefs, cloud).
     /// </summary>
-    public interface IStorage
+    public interface IStorage : IDisposable
     {
         /// <summary>
         /// Reads raw bytes for the key. Returns <c>Found == false</c> when the key has

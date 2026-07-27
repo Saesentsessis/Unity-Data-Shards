@@ -1,11 +1,12 @@
 using System;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 namespace Saesentsessis.Persistence.Layout
 {
 	/// <summary>
 	/// Save metadata: format version, timestamp, integrity checksum, the deduplicated
-	/// type table and one record per shard. <see cref="Types"/>/<see cref="Records"/>
+	/// type table and one record per shard. <see cref="types"/>/<see cref="records"/>
 	/// may be rented from ArrayPool and longer than the logical counts — always index
 	/// through <see cref="TypeCount"/>/<see cref="RecordCount"/>, never <c>.Length</c>.
 	/// </summary>
@@ -15,6 +16,21 @@ namespace Saesentsessis.Persistence.Layout
 	{
 		public const int CurrentFormatVersion = 3;
 
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public static SaveEnvelope Create(int typeCount, SerializedType[] types, int recordCount, ShardRecord[] records)
+		{
+			SaveEnvelope result = default;
+
+			result.FormatVersion = CurrentFormatVersion;
+			result.TimestampUtc = DateTime.UtcNow.Ticks;
+			result.types = types;
+			result.TypeCount = typeCount;
+			result.records = records;
+			result.RecordCount = recordCount;
+
+			return result;
+		}
+		
 		public int FormatVersion;
 		public long TimestampUtc;
 
@@ -24,10 +40,24 @@ namespace Saesentsessis.Persistence.Layout
 		/// </summary>
 		public ulong Checksum;
 
-		public SerializedType[] Types;
+		private SerializedType[] types;
 		public int TypeCount;
 
-		public ShardRecord[] Records;
+		private ShardRecord[] records;
 		public int RecordCount;
+		
+		public ReadOnlySpan<SerializedType> Types => types;
+		internal SerializedType[] TypesArray
+		{
+			readonly get => types;
+			set => types = value;
+		}
+
+		public ReadOnlySpan<ShardRecord> Records => records;
+		internal ShardRecord[] RecordsArray
+		{
+			readonly get => records;
+			set => records = value;
+		}
 	}
 }

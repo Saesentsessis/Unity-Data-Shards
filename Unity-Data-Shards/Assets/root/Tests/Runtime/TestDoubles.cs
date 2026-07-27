@@ -162,6 +162,12 @@ namespace Saesentsessis.Persistence.Tests
 			Data.Remove(key);
 			return PersistenceTask.CompletedTask;
 		}
+
+		public void Dispose()
+		{
+			Data.Clear();
+			WriteCounts.Clear();
+		}
 	}
 
 	/// <summary>Counts Serialize calls; background flag is configurable for deterministic tests.</summary>
@@ -211,8 +217,8 @@ namespace Saesentsessis.Persistence.Tests
 			WriteCalls++;
 			LastBlobCount = ranges.Length;
 			LastPayloadLength = payload.Length;
-			LastTypesArray = envelope.Types;
-			LastRecordsArray = envelope.Records;
+			LastTypesArray = envelope.TypesArray;
+			LastRecordsArray = envelope.RecordsArray;
 			LastBlobIds.Clear();
 
 			for (var i = 0; i < ranges.Length; i++)
@@ -229,5 +235,10 @@ namespace Saesentsessis.Persistence.Tests
 
 		public TaskType DeleteAsync(string slot, CancellationToken cancellation = default)
 			=> PersistenceTask.CompletedTask;
+
+		public void Dispose()
+		{
+			LastBlobIds.Clear();
+		}
 	}
 }

@@ -25,14 +25,14 @@ namespace Saesentsessis.Persistence.Storage
 	/// The two internal arenas are reused across calls, so one write/read may be in
 	/// flight at a time per instance. Not thread-safe by design.
 	/// </remarks>
-	public sealed class TransformStorage : IStorage, IDisposable
+	public sealed class TransformStorage : IStorage
 	{
 		private readonly IStorage _inner;
 		private readonly ISaveTransform[] _transforms;
 
 		// Ping-pong arenas: step N reads the previous step's buffer while writing the other.
-		private NativeListBufferWriter _front;
-		private NativeListBufferWriter _back;
+		private NativeListBufferWriter _frontBuffer;
+		private NativeListBufferWriter _backBuffer;
 
 		public TransformStorage(IStorage inner, params ISaveTransform[] transforms)
 		{
@@ -82,13 +82,12 @@ namespace Saesentsessis.Persistence.Storage
 
 		public void Dispose()
 		{
-			_front?.Dispose();
-			_back?.Dispose();
-			_front = null;
-			_back = null;
+			_frontBuffer?.Dispose();
+			_backBuffer?.Dispose();
+			_frontBuffer = null;
+			_backBuffer = null;
 
-			if (_inner is IDisposable disposable)
-				disposable.Dispose();
+			_inner.Dispose();
 		}
 
 		// Span locals are forbidden in async methods; the chains run in these sync helpers.
@@ -130,12 +129,12 @@ namespace Saesentsessis.Persistence.Storage
 		private NativeListBufferWriter Alternate(NativeListBufferWriter previous, int capacityHint)
 		{
 			if (previous == null)
-				return _front ??= new NativeListBufferWriter(Math.Max(capacityHint, 4096), Allocator.Persistent);
+				return _frontBuffer ??= new NativeListBufferWriter(Math.Max(capacityHint, 4096), Allocator.Persistent);
 
-			if (ReferenceEquals(previous, _front))
-				return _back ??= new NativeListBufferWriter(Math.Max(capacityHint, 4096), Allocator.Persistent);
+			if (ReferenceEquals(previous, _frontBuffer))
+				return _backBuffer ??= new NativeListBufferWriter(Math.Max(capacityHint, 4096), Allocator.Persistent);
 
-			return _front;
+			return _frontBuffer;
 		}
 	}
 }
