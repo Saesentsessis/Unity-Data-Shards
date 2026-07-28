@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-07-28
+
+### Changed
+
+- **BREAKING:** envelope format **v4**. The header is now a fixed 32-byte block — `[Checksum:8][FormatVersion:4][Magic:4][TimestampUtc:8][TypeCount:4][RecordCount:4]` — followed by the type table and the record block. Only the checksum sits outside the hashed region, so the version and the magic are now covered by it; every field lands on its natural alignment; and both counts precede all variable-length data.
+- **BREAKING:** format **v3 is no longer readable**. Saves written by 0.3.x are refused with `SaveCorruptedExceptionReason.UnsupportedVersion` and cannot be upgraded — delete or re-generate them. v3 placed the version *outside* the checksummed region (so it could be altered undetected) and split `TypeCount` from `RecordCount` across the variable-length type table (so neither the body size nor the record offset was knowable up front). Both were corrected by a clean break rather than a compatibility shim; `SaveEnvelopeV3` is deleted.
+- **BREAKING:** the envelope format is now explicitly **little-endian only**. The header and the record block are transferred as raw struct memory, so their in-memory layout is the wire layout. Every Unity target is little-endian; a big-endian host now throws `PlatformNotSupportedException` instead of silently writing unreadable files. Variable-length fields still go through `BinaryPrimitives`.
+- The record block is written and read as a single memcpy instead of field-by-field, and the header as one 32-byte store. `ShardRecord` is pinned to a 20-byte wire stride via `Pack = 4` rather than an undersized explicit `Size`, which no runtime is obliged to honor — a Mono/IL2CPP disagreement there would have made editor-written saves unreadable in a player build.
+- `SaveEnvelope.Types`/`Records` now slice to the logical counts, so a pooled backing array's tail can no longer leak into a save or to a consumer.
+- Wire types (`SaveEnvelopeHeader`, `SaveEnvelopeHeaderExtensions`) are `internal`: they are format details, not API.
+
+### Added
+
+- A `"SHRD"` magic tag in the header, validated before the version, so data that was never a Data Shards save is reported as `SaveCorruptedExceptionReason.InvalidMagic` rather than as a corrupt or unsupported save. It is also readable as ASCII in a hex dump.
+- `SaveCorruptedExceptionReason.InvalidMagic`.
+- An up-front plausibility check: because both counts now precede the body, the decoder rejects counts larger than the remaining bytes could possibly describe *before* allocating any array — a hostile count in a few dozen bytes of input can no longer drive a multi-megabyte allocation.
+- `[Conditional("ENABLE_PERSISTENCE_INTEGRITY_CHECKS")]` guards on `SaveEnvelope.Create`, rejecting a logical count larger than its backing array (which would otherwise publish adjacent pool memory into the file).
+- Codec tests: wire-layout size assertions (guarding IL2CPP divergence), magic emission and rejection, foreign-buffer rejection, unsupported-version rejection, hostile-count rejection, empty-envelope round-trip, and per-offset truncation fuzzing.
+
+### Removed
+
+- `SaveEnvelopeV3` and the v3 read path, along with the now-unused `ReadLong`/`ReadULong` decoders.
+- The dead `TimestampUtc` write in the header factory — the pipeline stamps it at write time, which is the only correct moment given envelopes are cached and reused across saves.
+
 ## [0.3.1] - 2026-07-25
 
 ### Added
@@ -106,6 +130,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Tests**: round-trips (0–1000 shards, both storage backends), incremental-save dirty accounting, envelope cache reuse/invalidation, background-serialization round-trip, blob migration with type rename, broken/cyclic chain detection, codec truncation fuzzing at every byte offset, whole-file bit-flip checksum sweep, `FileStorage` crash-recovery scenarios.
 - Dependencies: `com.cysharp.unitask` 2.3.3, `com.unity.collections` 2.1.4, `com.unity.burst` 1.8.0; Unity 2022.3+.
 
+[0.4.0]: https://github.com/Saesentsessis/Unity-Data-Shards/compare/0.3.1...0.4.0
 [0.3.1]: https://github.com/Saesentsessis/Unity-Data-Shards/compare/0.3.0...0.3.1
 [0.3.0]: https://github.com/Saesentsessis/Unity-Data-Shards/compare/0.2.1...0.3.0
 [0.2.1]: https://github.com/Saesentsessis/Unity-Data-Shards/compare/0.2.0...0.2.1
