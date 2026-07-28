@@ -22,6 +22,9 @@ namespace Saesentsessis.Persistence.Core
 	{
 		Unknown = 0,
 		ChecksumMismatch,
+
+		/// <summary>The file-format marker is absent: this data was not written by this package.</summary>
+		InvalidMagic,
 		UnsupportedVersion,
 		EnvelopeTruncated,
 		EnvelopeIsTooLarge,

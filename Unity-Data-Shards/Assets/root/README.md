@@ -39,7 +39,7 @@ IDataShard[] ──► ISerializer ──► arena (NativeList<byte> / pooled by
                                    │  + ShardBlobRange[] (id, offset, length)
                                    ▼
                               ISaveLayout  (single-file gather-write / multi-file)
-                                   │  envelope codec v3 + xxHash3 checksum
+                                   │  envelope codec v4 + xxHash3 checksum
                                    ▼
                           [TransformStorage]  (optional compression/encryption chain)
                                    ▼
@@ -60,7 +60,7 @@ Unity APIs — even on exception paths.
 - **Incremental Saves:** shards expose `IsDirty`; layouts that don't require a full
 snapshot receive only dirty blobs. The save envelope is cached per slot and invalidated
 by a `ShardStore` generation counter.
-- **Integrity by Default:** envelope format v3 is little-endian, fully bounds-checked
+- **Integrity by Default:** envelope format v4 is little-endian, fully bounds-checked
 on read, and gated by an xxHash3-64 checksum over everything past the header.
 Corruption throws `SaveCorruptedException` before a single byte is parsed.
 - **Blob-Level Migrations:** `IShardMigration` transforms raw serialized bytes keyed by
@@ -392,23 +392,32 @@ slot from the previous save's payload, so the steady state never reallocates
 mid-serialization. Layouts receive `(envelope, payload, ranges)` and gather-write —
 single-file packing is a straight concatenation with no re-copy.
 
-### 2. Envelope Format v3
+### 2. Envelope Format v4
 
 ```text
-[FormatVersion:4][Checksum:8] │ hashed region:
-  [Timestamp:8][TypeCount:4]
+[Checksum:8] │ hashed region:
+  [FormatVersion:4][Magic:4 "SHRD"][Timestamp:8][TypeCount:4][RecordCount:4]
   per type:   [nameLen:4][utf8 name][asmLen:4][utf8 asm][schemaVersion:4]
-  [RecordCount:4]
-  per record: [guid:16][typeIndex:4]
+  per record: [guid:16][typeIndex:4]      ← one memcpy for the whole block
   (single-file layouts append [ranges][payload] here)
 ```
 
-All primitives are written little-endian via `BinaryPrimitives` — endian-stable and
-safe on unaligned addresses. The xxHash3-64 checksum covers everything past the
-12-byte prefix, including the type table: a corrupted type name is exactly as fatal
-as a corrupted blob. `FormatVersion` stays outside the hash so it can always be parsed
-to pick a decoder. On read, the checksum is verified **before** any parsing; the
-decoder additionally bounds-checks every advance and sanity-caps all counts.
+The fixed 32-byte header is written as raw struct memory, which makes the format
+**little-endian only** — every Unity target is, and a big-endian host fails loudly
+rather than emitting files nothing can read back. Variable-length fields still go
+through `BinaryPrimitives`. Every field lands on its natural alignment.
+
+The xxHash3-64 checksum covers everything past the 8-byte checksum field, including
+the version, the magic and the type table: a corrupted type name is exactly as fatal
+as a corrupted blob, and a flipped version bit cannot steer the reader to a different
+decoder. On read the checksum is verified **before** any parsing; then the magic is
+matched (so foreign data is rejected as foreign, not as a corrupt save), and because
+*both* counts live in the fixed header, the decoder rejects impossible ones against
+the remaining byte count before allocating anything.
+
+> **Breaking in 0.4.0** — format **v3 cannot be read**. Its version field sat outside
+> the checksummed region and its two counts were split across the variable-length type
+> table. Saves written by 0.3.x are not upgradable; delete them or re-generate.
 
 ### 3. Ownership & Threading Contracts
 
@@ -470,7 +479,7 @@ Or manually add the scoped registry to your `Packages/manifest.json`:
 ```json
 {
   "dependencies": {
-    "com.saesentsessis.unity-data-shards": "0.3.1"
+    "com.saesentsessis.unity-data-shards": "0.4.0"
   },
   "scopedRegistries": [
     {
@@ -490,7 +499,7 @@ awaits workflow inside Unity context:
 ```json
 {
   "dependencies": {
-    "com.saesentsessis.unity-data-shards": "0.3.1",
+    "com.saesentsessis.unity-data-shards": "0.4.0",
     "com.cysharp.unitask": "2.0.0"
   },
   "scopedRegistries": [
@@ -509,7 +518,7 @@ awaits workflow inside Unity context:
 ### Method 2: Unity package installer
 
 1. Download the latest `.unitypackage` from [GitHub Releases page](https://github.com/Saesentsessis/Unity-Data-Shards/releases).
-   - _Direct Link:_ [Unity-Data-Shards-Installer.unitypackage](https://github.com/Saesentsessis/Unity-Data-Shards/releases/download/0.3.1/Unity-Data-Shards-Installer.unitypackage)
+   - _Direct Link:_ [Unity-Data-Shards-Installer.unitypackage](https://github.com/Saesentsessis/Unity-Data-Shards/releases/download/0.4.0/Unity-Data-Shards-Installer.unitypackage)
 2. Import the downloaded package into your Unity project.
 3. The installer will automatically configure OpenUPM in your `manifest.json` file and install the package dependencies.
 
@@ -530,7 +539,7 @@ awaits workflow inside Unity context:
 You can specify exact release version of this package like this:
 
 ```
-https://github.com/Saesentsessis/Unity-Data-Shards.git?path=Unity-Data-Shards/Assets/root#0.3.1
+https://github.com/Saesentsessis/Unity-Data-Shards.git?path=Unity-Data-Shards/Assets/root#0.4.0
 ```
 
 ## Credits
