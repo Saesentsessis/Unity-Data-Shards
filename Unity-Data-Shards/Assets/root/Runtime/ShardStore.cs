@@ -137,11 +137,48 @@ namespace Saesentsessis.Persistence
 			else
 				_index.Clear();
 
+			var present = 0;
+
 			foreach (var shard in shards)
-				if (shard != null)
-					_index[shard.Identifier] = shard;
+			{
+				if (shard == null)
+					continue;
+
+				_index[shard.Identifier] = shard;
+				present++;
+			}
+
+			WarnOnDuplicateIdentifiers(present);
 
 			Generation++;
+		}
+
+		/// <summary>
+		/// Add and the copy constructor both reject duplicates, so the only way two shards can share
+		/// an id is Unity deserialization — someone duplicated an element in the Inspector. The
+		/// dictionary silently collapses them while the list keeps both, and the divergence surfaces
+		/// later as a shard that saves but never loads back.
+		/// <para>
+		/// Detection is free: the index is smaller than the shard count exactly when ids collided.
+		/// It logs rather than throws on purpose — an exception out of <c>OnAfterDeserialize</c>
+		/// cannot be caught by the user and takes the Inspector down with it, which is a worse
+		/// outcome than a loud console error naming the offender.
+		/// </para>
+		/// </summary>
+		private void WarnOnDuplicateIdentifiers(int present)
+		{
+			if (_index.Count == present)
+				return;
+
+			var seen = new HashSet<SerializableGuid>();
+
+			foreach (var shard in shards)
+				// Qualified: System.Diagnostics is in scope here for [Conditional].
+				if (shard != null && seen.Add(shard.Identifier) == false)
+					UnityEngine.Debug.LogError(
+						$"[ShardStore] Duplicate shard id {shard.Identifier} on '{shard.GetType().Name}'. " +
+						"Only the last shard with this id is reachable; the others will never load back. " +
+						"Give each shard a unique Identifier.");
 		}
 
 		[Conditional("ENABLE_PERSISTENCE_INTEGRITY_CHECKS")]

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using Saesentsessis.Persistence.Buffers;
 using Saesentsessis.Persistence.Core;
@@ -6,17 +7,19 @@ using Unity.Collections;
 #if PERSISTENCE_HAS_UNITASK
 using TaskType = Cysharp.Threading.Tasks.UniTask;
 using BoolTask = Cysharp.Threading.Tasks.UniTask<bool>;
+using IntTask = Cysharp.Threading.Tasks.UniTask<int>;
 using StorageReadTask = Cysharp.Threading.Tasks.UniTask<Saesentsessis.Persistence.Core.StorageReadResult>;
 #else
 using TaskType = System.Threading.Tasks.Task;
 using BoolTask = System.Threading.Tasks.Task<bool>;
+using IntTask = System.Threading.Tasks.Task<int>;
 using StorageReadTask = System.Threading.Tasks.Task<Saesentsessis.Persistence.Core.StorageReadResult>;
 #endif
 
 namespace Saesentsessis.Persistence.Storage
 {
 	/// <summary>
-	/// <see cref="IStorage"/> decorator applying an <see cref="ISaveTransform"/> chain
+	/// <see cref="IStorage"/> decorator applying an <see cref="IStorageTransform"/> chain
 	/// (compression, encryption, ...) around any inner storage: Apply in declaration
 	/// order on write, Reverse in reverse order on read. Transforms compose with every
 	/// backend automatically — SaveManager and layouts are untouched.
@@ -25,19 +28,35 @@ namespace Saesentsessis.Persistence.Storage
 	/// The two internal arenas are reused across calls, so one write/read may be in
 	/// flight at a time per instance. Not thread-safe by design.
 	/// </remarks>
-	public sealed class TransformStorage : IStorage
+	public sealed class TransformStorage : IStorage, IListableStorage
 	{
 		private readonly IStorage _inner;
-		private readonly ISaveTransform[] _transforms;
+		private readonly IStorageTransform[] _transforms;
 
 		// Ping-pong arenas: step N reads the previous step's buffer while writing the other.
 		private NativeListBufferWriter _frontBuffer;
 		private NativeListBufferWriter _backBuffer;
 
-		public TransformStorage(IStorage inner, params ISaveTransform[] transforms)
+		/// <summary>
+		/// Wraps <paramref name="inner"/> in a transform chain that this storage owns.
+		/// </summary>
+		/// <remarks>
+		/// <b>Each transform belongs to exactly one storage.</b> Handing the same instance to two
+		/// chains is not supported: a transform carries per-operation scratch state — the cipher's
+		/// IV and arena, this decorator's own ping-pong buffers — and two storages driving one
+		/// instance would interleave through it. Disposing this storage disposes the chain with it.
+		/// </remarks>
+		public TransformStorage(IStorage inner, params IStorageTransform[] transforms)
 		{
 			_inner = inner ?? throw new ArgumentNullException(nameof(inner));
-			_transforms = transforms ?? Array.Empty<ISaveTransform>();
+			_transforms = transforms ?? Array.Empty<IStorageTransform>();
+
+			// Runs once per storage, and turns a null element into a message that names the slot
+			// instead of a NullReferenceException on the first save.
+			for (var i = _transforms.Length - 1; i >= 0; i--)
+				if (_transforms[i] == null)
+					throw new ArgumentNullException(nameof(transforms),
+						$"Transform at index {i} of {_transforms.Length} is null.");
 		}
 
 		public async StorageReadTask TryReadAsync(string key, Allocator allocator, CancellationToken cancellation = default)
@@ -74,6 +93,28 @@ namespace Saesentsessis.Persistence.Storage
 			await _inner.WriteAsync(key, transformed, cancellation);
 		}
 
+		/// <inheritdoc />
+		/// <remarks>
+		/// A straight forward to the wrapped storage: the chain rewrites values, never keys, so a
+		/// listing is identical either side of the decorator. Sizes therefore describe the bytes
+		/// <i>at rest</i> — compressed and encrypted — which is what a browser wants to report
+		/// anyway, since that is what the save occupies.
+		/// </remarks>
+		/// <exception cref="NotSupportedException">
+		/// The wrapped storage cannot enumerate. Decorating something unlistable makes
+		/// <c>is IListableStorage</c> true without making the call work, so this says so plainly
+		/// rather than returning an empty listing that reads as "no saves".
+		/// </exception>
+		public IntTask PopulateAsync(IList<StorageKeyInfo> destination, CancellationToken cancellation = default)
+		{
+			if (_inner is IListableStorage listable)
+				return listable.PopulateAsync(destination, cancellation);
+
+			throw new NotSupportedException(
+				$"[TransformStorage] The wrapped {_inner.GetType().Name} does not implement IListableStorage, " +
+				"so this chain cannot enumerate its keys.");
+		}
+
 		public BoolTask ExistsAsync(string key, CancellationToken cancellation = default)
 			=> _inner.ExistsAsync(key, cancellation);
 
@@ -87,6 +128,14 @@ namespace Saesentsessis.Persistence.Storage
 			_frontBuffer = null;
 			_backBuffer = null;
 
+			// The chain belongs to this storage, so it goes with it. Prohibiting a shared transform
+			// is what makes ownership unambiguous — there is only ever one owner to dispose it.
+			foreach (var transform in _transforms)
+				if (transform is IDisposable disposable)
+					disposable.Dispose();
+
+			// Same reasoning one level down: the inner storage is wrapped, not shared, and the
+			// package's layout -> storage disposal chain assumes each link releases the next.
 			_inner.Dispose();
 		}
 
@@ -96,15 +145,21 @@ namespace Saesentsessis.Persistence.Storage
 			var src = data.AsReadOnlySpan();
 			NativeListBufferWriter dst = null;
 
-			for (var i = 0; i < _transforms.Length; i++)
+			foreach (var transform in _transforms)
 			{
 				dst = Alternate(dst, src.Length);
 				dst.Clear();
-				_transforms[i].Apply(src, dst);
+				
+				transform.Apply(src, dst);
+
+				if (src.Length > 0 && dst.WrittenLength == 0)
+					throw new InvalidOperationException(
+						$"Transformation with {transform.GetType().Name} resulted in a buffer with 0 length.");
+				
 				src = dst.AsArray().AsReadOnlySpan();
 			}
 
-			return dst.AsArray();
+			return dst!.AsArray();
 		}
 
 		private NativeArray<byte> ReverseChain(NativeArray<byte> data, Allocator allocator)

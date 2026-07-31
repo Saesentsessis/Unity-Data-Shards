@@ -23,7 +23,17 @@ namespace Saesentsessis.Persistence.Layout
 	/// work. The xxHash3 checksum is patched over the full assembled buffer before
 	/// the storage write and verified before anything is parsed on read.
 	/// </summary>
-	public sealed class SingleFileSaveLayout : ISaveLayout
+	/// <remarks>
+	/// <b>Cost:</b> the payload is copied once, into a second arena as large as itself. That is
+	/// structural, not an oversight — the envelope has to precede the payload in the file, its size
+	/// is not known until serialization has finished, and <see cref="IStorage.WriteAsync"/> takes
+	/// one contiguous array. Peak unmanaged memory during a save is therefore about twice the
+	/// payload. It buys the property the layout exists for: the whole slot lands in one atomic
+	/// storage write, so a save is never half-applied. <see cref="MultiFileSaveLayout"/> makes the
+	/// opposite trade — a scratch buffer the size of the largest single blob, at the cost of
+	/// cross-file atomicity.
+	/// </remarks>
+	public sealed class SingleFileSaveLayout : ISaveLayout, ISlotKeyMapper
 	{
 		// guid(16) + offset(4) + length(4)
 		private const int RangeSize = 24;
@@ -41,8 +51,16 @@ namespace Saesentsessis.Persistence.Layout
 		public async TaskType WriteAsync(string slot, SaveEnvelope envelope, NativeArray<byte> payload,
 			NativeArray<ShardBlobRange> ranges, CancellationToken cancellation = default)
 		{
-			// Envelope strings are small; payload dominates — size the arena accordingly.
-			var arena = new NativeListBufferWriter(payload.Length + ranges.Length * RangeSize + 1024, Allocator.Persistent);
+			// Every section reserved exactly, the record block included. A flat guess for the envelope
+			// is what makes this arena grow, and it grows at the worst moment: the last reservation is
+			// the payload's, so an under-sized arena doubles a payload-sized buffer to gain a few
+			// kilobytes. Records alone are 20 bytes each, so the old 1 KB allowance ran out at ~47
+			// shards — well inside normal use.
+			var capacity = EnvelopeCodec.MaxEncodedSize(envelope)
+				+ 4 + ranges.Length * RangeSize
+				+ 4 + payload.Length;
+
+			var arena = new NativeListBufferWriter(capacity, Allocator.Persistent);
 
 			try
 			{
@@ -77,6 +95,18 @@ namespace Saesentsessis.Persistence.Layout
 
 		public TaskType DeleteAsync(string slot, CancellationToken cancellation = default)
 			=> _storage.DeleteAsync(slot, cancellation);
+
+		/// <inheritdoc />
+		/// <remarks>
+		/// A slot is exactly one key here, so the key <i>is</i> the slot and every key holds an
+		/// envelope — the lengths always match.
+		/// </remarks>
+		public bool TryGetSlot(ReadOnlySpan<char> storageKey, out ReadOnlySpan<char> slot)
+		{
+			slot = storageKey;
+
+			return storageKey.IsEmpty == false;
+		}
 
 		private static void Pack(in SaveEnvelope envelope, NativeArray<byte> payload,
 			NativeArray<ShardBlobRange> ranges, NativeListBufferWriter writer)

@@ -95,7 +95,7 @@ namespace Saesentsessis.Persistence.Layout
 		/// than the counts; everything downstream indexes through the counts.
 		/// </summary>
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public static SaveEnvelope Create(int typeCount, SerializedType[] types, int recordCount, ShardRecord[] records)
+		internal static SaveEnvelope Create(int typeCount, SerializedType[] types, int recordCount, ShardRecord[] records)
 		{
 			CheckCounts(typeCount, types, recordCount, records);
 
@@ -165,7 +165,7 @@ namespace Saesentsessis.Persistence.Layout
 			[MethodImpl(MethodImplOptions.AggressiveInlining)]
 			readonly get => header.TimestampUtc;
 			[MethodImpl(MethodImplOptions.AggressiveInlining)]
-			set => header.TimestampUtc = value;
+			internal set => header.TimestampUtc = value;
 		}
 
 		public int TypeCount
@@ -173,7 +173,7 @@ namespace Saesentsessis.Persistence.Layout
 			[MethodImpl(MethodImplOptions.AggressiveInlining)]
 			readonly get => header.TypeCount;
 			[MethodImpl(MethodImplOptions.AggressiveInlining)]
-			set => header.TypeCount = value;
+			internal set => header.TypeCount = value;
 		}
 
 		public int RecordCount
@@ -181,7 +181,7 @@ namespace Saesentsessis.Persistence.Layout
 			[MethodImpl(MethodImplOptions.AggressiveInlining)]
 			readonly get => header.RecordCount;
 			[MethodImpl(MethodImplOptions.AggressiveInlining)]
-			set => header.RecordCount = value;
+			internal set => header.RecordCount = value;
 		}
 	}
 }

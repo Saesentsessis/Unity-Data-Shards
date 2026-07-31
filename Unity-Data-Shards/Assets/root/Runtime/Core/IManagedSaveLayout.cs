@@ -23,6 +23,11 @@ namespace Saesentsessis.Persistence.Core
 		/// If true, SaveManager must provide blobs for ALL shards on every save.
 		/// If false, only dirty shard blobs are passed.
 		/// </summary>
+		/// <remarks>
+		/// Returning false takes on the same obligation as
+		/// <see cref="ISaveLayout.RequiresFullSnapshot"/>, and <see cref="IIncrementalSaveLayout"/>
+		/// discharges it the same way.
+		/// </remarks>
 		bool RequiresFullSnapshot { get; }
 
 		/// <summary>

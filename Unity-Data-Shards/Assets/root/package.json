@@ -14,7 +14,7 @@
         "unitask",
         "migration"
     ],
-    "version": "0.4.0",
+    "version": "0.5.0",
     "unity": "2022.3",
     "description": "Performance-first save-system abstraction: GUID-identified data shards flowing through a zero-copy arena pipeline into pluggable serializers, layouts, and storage backends. Incremental saves, xxHash3-checksummed envelopes, blob-level schema migrations.",
     "dependencies": {
@@ -41,6 +41,21 @@
             "displayName": "protobuf-net Serializer",
             "description": "ISerializer backed by protobuf-net with auto member mapping and a fixed64 SerializableGuid surrogate. Requires protobuf-net.",
             "path": "Samples~/ProtobufNet"
+        },
+        {
+            "displayName": "LZ4 Compression Transform",
+            "description": "IStorageTransform compressing each storage key with LZ4. Fast with a modest ratio; pure managed C#. Requires K4os.Compression.LZ4.",
+            "path": "Samples~/LZ4Compression"
+        },
+        {
+            "displayName": "Zstandard Compression Transform",
+            "description": "IStorageTransform compressing each storage key with Zstandard. Better ratio than LZ4, slower. Requires ZstdSharp.Port.",
+            "path": "Samples~/ZstdCompression"
+        },
+        {
+            "displayName": "Android PlayerPrefs Reader",
+            "description": "Java helper required to list PlayerPrefs save slots on Android. Filters keys Java-side, so only matches cross JNI. Needed only for slot browsing; rebuild the APK after importing.",
+            "path": "Samples~/AndroidPlayerPrefsReader"
         }
     ]
 }

@@ -18,17 +18,30 @@ namespace Saesentsessis.Persistence.Core
 	/// Defines how serialized shard blobs are organized on storage. Implementations
 	/// decide whether each shard occupies its own key (multi-file) or all shards are
 	/// packed into a single key (single-file). Shard bytes arrive as one contiguous
-	/// payload arena indexed by <see cref="ShardBlobRange"/>s, so single-file packing
-	/// is a straight gather-write with no re-copy. The envelope is always serialized
+	/// payload arena indexed by <see cref="ShardBlobRange"/>s, so a layout never walks
+	/// per-shard structures — it gathers ranges. The envelope is always serialized
 	/// via a fixed binary codec, independent of the shard serializer, and the layout
 	/// is responsible for computing/verifying the envelope checksum.
 	/// </summary>
+	/// <remarks>
+	/// The payload arena is a borrowed view, not a buffer the layout can extend, and
+	/// <see cref="IStorage.WriteAsync"/> takes one contiguous array — so a layout that has to
+	/// prefix bytes onto the payload copies it into a buffer of its own. Single-file packing pays
+	/// that once for the whole payload; multi-file pays it per shard file, but only ever holds one
+	/// blob at a time. Neither is copy-free; the difference is peak memory, not total bytes moved.
+	/// </remarks>
 	public interface ISaveLayout : IDisposable
 	{
 		/// <summary>
 		/// If true, SaveManager must provide blobs for ALL shards on every save
 		/// (single-file packing). If false, only dirty shard blobs are passed.
 		/// </summary>
+		/// <remarks>
+		/// Returning false takes on an obligation: every envelope record whose blob is not in this
+		/// call must already be on storage. Implement <see cref="IIncrementalSaveLayout"/> to let
+		/// SaveManager check that for you — a shard can be clean and still have no blob, and without
+		/// the capability neither side notices until the save fails to load.
+		/// </remarks>
 		bool RequiresFullSnapshot { get; }
 
 		/// <summary>
