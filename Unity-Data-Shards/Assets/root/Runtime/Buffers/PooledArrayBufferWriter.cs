@@ -14,12 +14,20 @@ namespace Saesentsessis.Persistence.Buffers
 		private const int DefaultChunkSize = 256;
 		private static readonly ArrayPool<byte> Pool = ArrayPool<byte>.Shared;
 
+		private readonly bool _clearOnRelease;
+
 		private byte[] _buffer;
 		private int _written;
 
-		public PooledArrayBufferWriter(int initialCapacity = 4096)
+		/// <param name="clearOnRelease">
+		/// Zeroes the backing array before it goes back to the pool — on growth as well as on
+		/// dispose. Set it when the arena holds secrets (key material, decrypted saves), since a
+		/// pooled array is handed to the next renter with its previous contents intact.
+		/// </param>
+		public PooledArrayBufferWriter(int initialCapacity = 4096, bool clearOnRelease = false)
 		{
 			_buffer = Pool.Rent(initialCapacity);
+			_clearOnRelease = clearOnRelease;
 		}
 
 		public int WrittenLength
@@ -69,7 +77,7 @@ namespace Saesentsessis.Persistence.Buffers
 			if (_buffer == null)
 				return;
 
-			Pool.Return(_buffer);
+			Pool.Return(_buffer, _clearOnRelease);
 			_buffer = null;
 		}
 
@@ -90,7 +98,7 @@ namespace Saesentsessis.Persistence.Buffers
 
 			var next = Pool.Rent(newCapacity);
 			Buffer.BlockCopy(_buffer, 0, next, 0, _written);
-			Pool.Return(_buffer);
+			Pool.Return(_buffer, _clearOnRelease);
 			_buffer = next;
 		}
 	}

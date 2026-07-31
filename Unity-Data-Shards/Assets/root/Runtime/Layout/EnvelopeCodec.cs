@@ -53,6 +53,38 @@ namespace Saesentsessis.Persistence.Layout
 		private static readonly UTF8Encoding Utf8 = new(encoderShouldEmitUTF8Identifier: false);
 
 		/// <summary>
+		/// Upper bound on the bytes <see cref="Write"/> appends for this envelope, and on the
+		/// largest reservation it makes along the way. Size an assembly buffer with this and the
+		/// encode cannot trigger a reallocation.
+		/// </summary>
+		/// <remarks>
+		/// Matches <see cref="Write"/>'s own worst case rather than the exact encoded length: strings
+		/// are counted at three bytes per UTF-16 char, which is what <c>WriteString</c> reserves
+		/// before it encodes. Counting exactly would mean a UTF-8 pass over every type name to save a
+		/// few hundred bytes of unused <i>capacity</i> — the encoded output is unaffected either way.
+		/// The record block, which is the part that actually scales, is counted exactly.
+		/// </remarks>
+		public static int MaxEncodedSize(in SaveEnvelope envelope)
+		{
+			long size = UnsafeUtility.SizeOf<SaveEnvelopeHeader>()
+				+ (long)envelope.RecordCount * UnsafeUtility.SizeOf<ShardRecord>();
+
+			for (var i = 0; i < envelope.TypeCount; i++)
+			{
+				ref readonly var type = ref envelope.Types[i];
+
+				// [nameLen:4][utf8 name][asmLen:4][utf8 asm][schemaVersion:4]
+				size += MinTypeEntryBytes + 3L * type.TypeName.Length + 3L * type.AssemblyName.Length;
+			}
+
+			if (size > int.MaxValue)
+				throw new InvalidOperationException(
+					$"Envelope needs up to {size} bytes to encode, past the {int.MaxValue}-byte buffer limit.");
+
+			return (int)size;
+		}
+
+		/// <summary>
 		/// Appends the encoded envelope to the writer, single pass (no pre-sizing scan).
 		/// The checksum field is written as zero — the layout patches it via
 		/// <see cref="PatchChecksum"/> once the full buffer (envelope + any appended

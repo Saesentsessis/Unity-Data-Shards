@@ -37,6 +37,12 @@ namespace Saesentsessis.Persistence
 		// extends shard lifetimes; entries are evicted on DeleteAsync or replacement.
 		private readonly Dictionary<string, EnvelopeCacheEntry> _envelopeCache = new();
 
+		// The cache above is read-modify-written across awaits (look up, build, evict, store), which
+		// no thread-safe dictionary can make atomic on its own: two savers can both miss, both
+		// build, and one can then release pooled arrays the other has already handed to the
+		// pipeline. Serialising per slot is the fix; SlotGate documents what each build pays.
+		private readonly SlotGate _slotGate = new();
+
 		public SaveManager(ISerializer serializer, ISaveLayout layout, MigrationRegistry migrations = null)
 		{
 			_pipeline = new UnmanagedPipeline(serializer, layout);
@@ -52,8 +58,8 @@ namespace Saesentsessis.Persistence
 		}
 
 		/// <summary>
-		/// Serializes and persists the given shards. Only dirty shards are written unless
-		/// the layout requires a full snapshot.
+		/// Serializes and persists the given shards. Only dirty shards are written unless the layout
+		/// requires a full snapshot or does not already hold the shard's blob.
 		/// </summary>
 		/// <remarks>
 		/// CONTRACT: shards must not be mutated between the call and the task's completion.
@@ -66,9 +72,8 @@ namespace Saesentsessis.Persistence
 			EnsureSlotIsValid(slot);
 
 			var count = shards.Count;
-			var fullSnapshot = _pipeline.RequiresFullSnapshot;
 
-			// Capture the dirty set synchronously, before any await or thread hop.
+			// Capture the blob set synchronously, before any await or thread hop.
 			// An empty shard set skips the scan and the bit array entirely.
 			var snapshot = count > 0 ? new NativeBitArray(count, Allocator.Persistent) : default;
 			var envelope = default(SaveEnvelope);
@@ -76,16 +81,12 @@ namespace Saesentsessis.Persistence
 
 			try
 			{
-				var blobCount = 0;
+				await _slotGate.EnterAsync(slot, cancellation);
 
-				for (var i = 0; i < count; i++)
-				{
-					if (!fullSnapshot && !shards[i].IsDirty)
-						continue;
-
-					snapshot.Set(i, true);
-					blobCount++;
-				}
+				// Inside the gate: the layout's view of what it holds is only stable while nothing
+				// else is committing to this slot.
+				var blobCount = CaptureBlobSet(slot, shards, snapshot,
+					_pipeline.RequiresFullSnapshot, _pipeline.Incremental);
 
 				envelope = GetOrBuildEnvelope(slot, shards, out releaseEnvelope);
 				envelope.TimestampUtc = DateTime.UtcNow.Ticks;
@@ -104,6 +105,8 @@ namespace Saesentsessis.Persistence
 
 				if (releaseEnvelope)
 					ReleaseEnvelope(envelope);
+
+				_slotGate.Exit(slot);
 			}
 		}
 
@@ -111,12 +114,21 @@ namespace Saesentsessis.Persistence
 		{
 			EnsureSlotIsValid(slot);
 
-			var shards = await _pipeline.LoadAsync(slot, _migrations, cancellation);
+			await _slotGate.EnterAsync(slot, cancellation);
 
-			for (var i = shards.Length - 1; i >= 0; i--)
-				shards[i].ClearDirty();
+			try
+			{
+				var shards = await _pipeline.LoadAsync(slot, _migrations, cancellation);
 
-			return shards;
+				for (var i = shards.Length - 1; i >= 0; i--)
+					shards[i].ClearDirty();
+
+				return shards;
+			}
+			finally
+			{
+				_slotGate.Exit(slot);
+			}
 		}
 
 		public BoolTask ExistsAsync(string slot, CancellationToken cancellation = default)
@@ -126,16 +138,156 @@ namespace Saesentsessis.Persistence
 			return _pipeline.ExistsAsync(slot, cancellation);
 		}
 
-		public TaskType DeleteAsync(string slot, CancellationToken cancellation = default)
+		public async TaskType DeleteAsync(string slot, CancellationToken cancellation = default)
 		{
 			EnsureSlotIsValid(slot);
-			
-			// The slot's persisted state is gone; drop its cached envelope with it.
-			if (_envelopeCache.Remove(slot, out var stale))
-				ReleaseEnvelope(stale.Envelope);
 
-			return _pipeline.DeleteAsync(slot, cancellation);
+			// async, unlike the other delegating members: the cache eviction below and the pipeline
+			// delete have to sit inside one gated section, or a save running concurrently can
+			// repopulate the cache for a slot that is being deleted.
+			await _slotGate.EnterAsync(slot, cancellation);
+
+			try
+			{
+				// The slot's persisted state is gone; drop its cached envelope with it.
+				if (_envelopeCache.Remove(slot, out var stale))
+					ReleaseEnvelope(stale.Envelope);
+
+				await _pipeline.DeleteAsync(slot, cancellation);
+			}
+			finally
+			{
+				_slotGate.Exit(slot);
+			}
 		}
+
+		#region Blob capture
+
+		/// <summary>
+		/// Sets a bit for every shard whose blob this save has to write, and returns how many.
+		/// </summary>
+		/// <remarks>
+		/// Dirtiness is not the whole rule. An incremental layout is handed dirty blobs only and is
+		/// expected to still hold the rest, so a clean shard whose blob is <i>not</i> on storage has
+		/// to be written too — otherwise the envelope commits a record pointing at nothing. Two
+		/// ordinary sequences reach that state: removing a shard and later restoring it unmodified
+		/// (the removal deleted the blob), and loading one slot to save it into another (loading
+		/// clears every dirty flag, so the new slot would get an envelope and no blobs at all).
+		/// <para>
+		/// Span locals are forbidden in async methods, so this stays synchronous and
+		/// <see cref="SaveAsync"/> calls it between the gate and the first await.
+		/// </para>
+		/// </remarks>
+		private static int CaptureBlobSet(string slot, IReadOnlyList<IDataShard> shards, NativeBitArray snapshot,
+			bool fullSnapshot, IIncrementalSaveLayout incremental)
+		{
+			var count = shards.Count;
+
+			if (count == 0)
+				return 0;
+
+			if (fullSnapshot)
+			{
+				for (var i = 0; i < count; i++)
+					snapshot.Set(i, true);
+
+				return count;
+			}
+
+			// A layout that reports nothing — including one that does not implement the capability at
+			// all — is taken at its word only for the shards it does list. Everything else is written.
+			var persisted = incremental == null ? default : incremental.GetPersistedIds(slot);
+
+			// Nothing on storage to match against, so every shard is written and the set logic below
+			// could only reach that answer the slow way. This is not a rare path: it is the first save
+			// of every session, plus every save through a layout without the capability.
+			if (persisted.IsEmpty)
+			{
+				for (var i = 0; i < count; i++)
+					snapshot.Set(i, true);
+
+				return count;
+			}
+
+			// Cheap gate first, mirroring MultiFileSaveLayout's orphan diff: the same ids in the same
+			// order means every blob is already on storage, so dirtiness alone decides. This is the
+			// steady state — save the same store over and over — and it rents nothing.
+			if (persisted.Length == count && MatchesInOrder(persisted, shards))
+				return CaptureDirty(shards, snapshot);
+
+			var known = HashSetPool<SerializableGuid>.Get();
+
+			try
+			{
+				for (var i = 0; i < persisted.Length; i++)
+					known.Add(persisted[i]);
+
+				var blobCount = 0;
+
+				for (var i = 0; i < count; i++)
+				{
+					var shard = shards[i];
+
+					if (!shard.IsDirty && known.Contains(shard.Identifier))
+						continue;
+
+					snapshot.Set(i, true);
+					blobCount++;
+				}
+
+				return blobCount;
+			}
+			finally
+			{
+				HashSetPool<SerializableGuid>.Release(known);
+			}
+		}
+
+		private static int CaptureDirty(IReadOnlyList<IDataShard> shards, NativeBitArray snapshot)
+		{
+			var blobCount = 0;
+			var count = shards.Count;
+
+			for (var i = 0; i < count; i++)
+			{
+				if (!shards[i].IsDirty)
+					continue;
+
+				snapshot.Set(i, true);
+				blobCount++;
+			}
+
+			return blobCount;
+		}
+
+		/// <summary>Ordered comparison — record order is stable for an unchanged store.</summary>
+		private static bool MatchesInOrder(ReadOnlySpan<SerializableGuid> persisted, IReadOnlyList<IDataShard> shards)
+		{
+			for (var i = 0; i < persisted.Length; i++)
+				if (persisted[i].Equals(shards[i].Identifier) == false)
+					return false;
+
+			return true;
+		}
+
+		// A layout that cannot report its membership is assumed to hold nothing, which is safe but
+		// costs a full write on every save — silently, and only for layouts outside this package.
+		// Trusting it instead would trade that cost for saves that fail to load, so the choice is
+		// made for correctness and announced once, while the author can still act on it.
+		[Conditional("UNITY_EDITOR"), Conditional("DEVELOPMENT_BUILD")]
+		private static void WarnIfIncrementalWithoutMembership(object layout, bool requiresFullSnapshot)
+		{
+			if (requiresFullSnapshot || layout is IIncrementalSaveLayout)
+				return;
+
+			UnityEngine.Debug.LogWarning(
+				$"{layout.GetType().Name} saves incrementally but does not implement IIncrementalSaveLayout, so " +
+				"SaveManager cannot tell whether a clean shard's blob is still on storage and has to write every " +
+				"shard on every save. Implementing it restores incremental writes; leaving it unimplemented is " +
+				"safe, only slower.");
+		}
+
+		#endregion
 
 		#region Envelope
 
@@ -353,7 +505,9 @@ namespace Saesentsessis.Persistence
 
 		#endregion
 
-		[Conditional("ENABLE_PERSISTENCE_INTEGRITY_CHECKS")]
+		// Deliberately NOT [Conditional]: this validates caller input on a public entry point. A null
+		// slot that survives to the storage layer fails there in a backend-specific way that says
+		// nothing about the actual mistake. One null check per save is not a cost worth stripping.
 		private static void EnsureSlotIsValid(string slot)
 		{
 			if (string.IsNullOrEmpty(slot))
@@ -363,6 +517,10 @@ namespace Saesentsessis.Persistence
 		private interface IPipeline : IDisposable
 		{
 			bool RequiresFullSnapshot { get; }
+
+			/// <summary>The layout's membership capability, or null when it has none.</summary>
+			IIncrementalSaveLayout Incremental { get; }
+
 			TaskType SaveAsync(string slot, SaveEnvelope envelope, IReadOnlyList<IDataShard> shards, NativeBitArray snapshot, int blobCount, CancellationToken cancellation);
 			ShardArrayTask LoadAsync(string slot, MigrationRegistry migrations, CancellationToken cancellation);
 			BoolTask ExistsAsync(string slot, CancellationToken cancellation);
@@ -379,13 +537,21 @@ namespace Saesentsessis.Persistence
 			// touched after SwitchToMainThread.
 			private readonly Dictionary<string, int> _arenaSizeHints = new();
 
+			// Resolved once: the cast is a type test per save otherwise, and the answer cannot change.
+			private readonly IIncrementalSaveLayout _incremental;
+
 			public UnmanagedPipeline(ISerializer serializer, ISaveLayout layout)
 			{
 				_serializer = serializer;
 				_layout = layout;
+				_incremental = layout as IIncrementalSaveLayout;
+
+				WarnIfIncrementalWithoutMembership(layout, layout.RequiresFullSnapshot);
 			}
 
 			public bool RequiresFullSnapshot => _layout.RequiresFullSnapshot;
+
+			public IIncrementalSaveLayout Incremental => _incremental;
 
 			public async TaskType SaveAsync(string slot, SaveEnvelope envelope, IReadOnlyList<IDataShard> shards,
 				NativeBitArray snapshot, int blobCount, CancellationToken cancellation)
@@ -501,13 +667,20 @@ namespace Saesentsessis.Persistence
 			private readonly IManagedSaveLayout _layout;
 			private readonly Dictionary<string, int> _arenaSizeHints = new();
 
+			private readonly IIncrementalSaveLayout _incremental;
+
 			public ManagedPipeline(ISerializer serializer, IManagedSaveLayout layout)
 			{
 				_serializer = serializer;
 				_layout = layout;
+				_incremental = layout as IIncrementalSaveLayout;
+
+				WarnIfIncrementalWithoutMembership(layout, layout.RequiresFullSnapshot);
 			}
 
 			public bool RequiresFullSnapshot => _layout.RequiresFullSnapshot;
+
+			public IIncrementalSaveLayout Incremental => _incremental;
 
 			public async TaskType SaveAsync(string slot, SaveEnvelope envelope, IReadOnlyList<IDataShard> shards,
 				NativeBitArray snapshot, int blobCount, CancellationToken cancellation)
@@ -616,7 +789,11 @@ namespace Saesentsessis.Persistence
 
 		public void Dispose()
 		{
+			foreach (var entry in _envelopeCache.Values)
+				ReleaseEnvelope(entry.Envelope);
+
 			_envelopeCache.Clear();
+			_slotGate.Dispose();
 			_pipeline.Dispose();
 		}
 	}

@@ -6,7 +6,9 @@
         "Saesentsessis.Persistence.Runtime",
         "Saesentsessis.Persistence.Newtonsoft",
         "UniTask",
-        "Unity.Collections"
+        "Unity.Collections",
+        "Unity.Mathematics",
+        "Unity.Burst"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

@@ -16,8 +16,9 @@ modeled as a flat set of **shards** — GUID-identified units serialized indepen
 flowing through a zero-copy arena pipeline into pluggable serializers, layouts, and
 storage backends.
 
-Two native allocations per save, regardless of shard count. No exact-size buffer
-contracts. No main-thread serialization stalls.
+Two native/managed (depending on backend) pipeline allocations per save — the arena and the
+range array — regardless of shard count; layouts add one assembly buffer on top. No exact-size
+buffer contracts. No main-thread serialization stalls.
 
 ## The Problem & The Solution
 
@@ -49,8 +50,9 @@ IDataShard[] ──► ISerializer ──► arena (NativeList<byte> / pooled by
 ## Core Features
 
 - **Arena Pipeline:** all shard bytes land in one contiguous buffer indexed by
-blittable `(id, offset, length)` ranges. A save performs **two** native allocations
-total; disposal is two frees instead of one per shard.
+blittable `(id, offset, length)` ranges. The pipeline performs **two** native allocations
+per save whatever the shard count, and the layout one more to assemble its output;
+disposal is a handful of frees instead of one per shard.
 - **`IBufferWriter<byte>` Serializer Contract:** no exact-size returns, no pre-measure
 pass, no intermediate copies. Any writer-based serializer (MessagePack-CSharp,
 `Utf8JsonWriter`, custom binary) plugs in directly.
@@ -58,11 +60,21 @@ pass, no intermediate copies. Any writer-based serializer (MessagePack-CSharp,
 run on the thread pool; the pipeline restores main-thread affinity before touching
 Unity APIs — even on exception paths.
 - **Incremental Saves:** shards expose `IsDirty`; layouts that don't require a full
-snapshot receive only dirty blobs. The save envelope is cached per slot and invalidated
-by a `ShardStore` generation counter.
+snapshot receive only dirty blobs — plus any shard the layout reports it is *not* already
+holding, so a restored shard or a save-as never commits an envelope over missing files. The
+save envelope is cached per slot and invalidated by a `ShardStore` generation counter.
 - **Integrity by Default:** envelope format v4 is little-endian, fully bounds-checked
-on read, and gated by an xxHash3-64 checksum over everything past the header.
-Corruption throws `SaveCorruptedException` before a single byte is parsed.
+on read, and gated by an xxHash3-64 checksum over everything past the checksum field
+itself — the version, the magic and both counts are inside the hashed region, so a
+flipped version bit cannot steer the reader to a different decoder. Corruption throws
+`SaveCorruptedException` before a single byte is parsed.
+- **Hostile Saves, Not Just Corrupt Ones:** a save file is treated as untrusted input.
+Storage keys are confined to the save root by full-path normalization; a compressed
+payload's declared output length is bounded by the format's maximum expansion before
+anything is reserved; envelope counts are checked against the remaining bytes up front.
+None of it is behind a scripting define. Where you need to detect *deliberate* edits
+rather than accidental damage, `AesCbcHmacTransform`'s keyed tag does what the
+envelope's unkeyed checksum cannot — anyone can recompute a checksum.
 - **Blob-Level Migrations:** `IShardMigration` transforms raw serialized bytes keyed by
 the *stored type name*, so schema upgrades can reshape fields and rename types even
 after the legacy class was deleted.
@@ -70,24 +82,29 @@ after the legacy class was deleted.
 restore, reads through `AsyncReadManager` directly into unmanaged memory — no
 thread-pool thread blocked on I/O, no managed intermediate.
 - **Transform Chain:** `TransformStorage` decorates any storage backend with a
-reversible `ISaveTransform` chain (compression, encryption) — zero changes to the
-manager or layouts.
+reversible `IStorageTransform` chain — zero changes to the manager or layouts.
+Dependency-free `DeflateTransform`, `AesCbcHmacTransform` (AES-256-CBC + HMAC-SHA256,
+encrypt-then-MAC) and `XorTransform` ship in the box; LZ4 and Zstandard are one-file
+samples.
 
 ## Key Types
 
-| Type                   | Description                                                              |
-|------------------------|--------------------------------------------------------------------------|
-| `SaveManager`          | Orchestrates the pipeline: dirty snapshot, envelope cache, save/load     |
-| `IDataShard`           | Atomic unit of save data with a stable `SerializableGuid` identity       |
-| `ShardStore`           | Flat, GUID-indexed shard set with O(1) lookup and a generation counter   |
-| `ISerializer`          | Object ⇄ bytes via `IBufferWriter<byte>` / `ReadOnlySpan<byte>`          |
-| `ISaveLayout`          | How blobs map onto storage keys (single-file vs multi-file)              |
-| `IStorage`             | Physical medium: `FileStorage`, `PlayerPrefsStorage`, `CloudSaveStorage` |
-| `SingleFileSaveLayout` | One gather-written, checksummed file per slot (atomic snapshot)          |
-| `MultiFileSaveLayout`  | Envelope + one checksummed file per shard; rewrites only dirty shards    |
-| `TransformStorage`     | Storage decorator applying an `ISaveTransform` chain                     |
-| `MigrationRegistry`    | Chains `IShardMigration` steps over raw blob bytes                       |
-| `SerializableGuid`     | Blittable, Unity-serializable 128-bit identity                           |
+| Type                     | Description                                                              |
+|--------------------------|--------------------------------------------------------------------------|
+| `SaveManager`            | Orchestrates the pipeline: dirty snapshot, envelope cache, save/load     |
+| `IDataShard`             | Atomic unit of save data with a stable `SerializableGuid` identity       |
+| `ShardStore`             | Flat, GUID-indexed shard set with O(1) lookup and a generation counter   |
+| `ISerializer`            | Object ⇄ bytes via `IBufferWriter<byte>` / `ReadOnlySpan<byte>`          |
+| `ISaveLayout`            | How blobs map onto storage keys (single-file vs multi-file)              |
+| `IIncrementalSaveLayout` | Layout capability — "which shard blobs do you already hold?"             |
+| `IStorage`               | Physical medium: `FileStorage`, `PlayerPrefsStorage`, `CloudSaveStorage` |
+| `SingleFileSaveLayout`   | One gather-written, checksummed file per slot (atomic snapshot)          |
+| `MultiFileSaveLayout`    | Envelope + one checksummed file per shard; rewrites only dirty shards    |
+| `TransformStorage`       | Storage decorator applying an `IStorageTransform` chain                  |
+| `SaveSlotBrowser`        | Lists existing slots and decodes their envelope headers on demand        |
+| `IStorageDescriptor`     | Serializable recipe for a backend, so one can be picked in the Inspector |
+| `MigrationRegistry`      | Chains `IShardMigration` steps over raw blob bytes                       |
+| `SerializableGuid`       | Blittable, Unity-serializable 128-bit identity                           |
 
 ## Quick Start
 
@@ -159,11 +176,23 @@ player.MarkDirty();
 await manager.SaveAsync("slot-1", store);   // rewrites ONLY the player shard's file + the envelope
 ```
 
+Dirtiness is not the whole rule, though — **a clean shard is still written when the layout
+does not already hold its blob**. Two ordinary sequences reach that state: removing a shard
+and later restoring it unmodified (the removal deleted its file), and loading one slot to
+save it into another (loading clears every dirty flag). In both cases the envelope would
+otherwise commit records pointing at files that were never written, and the save would fail
+to load. Layouts report what they hold through `IIncrementalSaveLayout`; a layout that does
+not implement it is assumed to hold nothing, which is safe but writes every shard every save.
+
 `MultiFileSaveLayout` stores one envelope file per slot plus one file per shard
 (`slot/<guid-hex>`), each framed with its own xxHash3-64 checksum. The envelope is
 written last and acts as the commit point. Trade-off vs `SingleFileSaveLayout`:
 per-file writes are atomic, but a crash mid-save can leave a mixed-generation state
-across shards — acceptable because shards are independent by design.
+across shards — acceptable because shards are independent by design. It tracks the
+membership it last saw on disk, which both sweeps orphaned files after a shard is removed
+and tells `SaveManager` when a restored one has to be written again; a slot it has neither
+read nor written this session is unknown, so the first save through a fresh layout is a full
+write.
 
 ### Schema Migrations
 
@@ -201,7 +230,7 @@ Reshaping raw bytes is the expert path. When you would rather write a migration 
 C#, derive from `TypedShardMigration<TOld, TNew>` and implement a single `Convert`. The base
 class deserializes the old shape, hands it to you, and reserializes the result — so a typed
 step is still just an `IShardMigration` in the same chain, with no wire-format knowledge
-required. `TOld` may be a plain versioned snapshot class kept only for migration.
+required. `TOld` may be a plain, versioned snapshot class kept only for migration.
 
 ```csharp
 public sealed class PlayerV1ToV2 : TypedShardMigration<PlayerShardV1, PlayerShard>
@@ -234,12 +263,19 @@ var manager = new SaveManagerBuilder()
     .Build();
 ```
 
+> [!NOTE]
+> `IManagedSaveLayout` / `IManagedStorage` are the GC-heap counterparts of `ISaveLayout` /
+> `IStorage`, for backends that cannot hand out native memory. The interfaces and the
+> `SaveManager` pipeline behind them are in place, but **no implementation ships yet** — choosing
+> the managed path today means writing both a layout and a storage yourself. Unless you have a
+> backend that forces it, stay on the `NativeArray` path, where everything below is provided.
+
 ### Importing Existing (Non-Shard) Saves
 
 Schema migrations only apply to data that already has a save envelope. Adopting a save written
 *before* this package — a plain `PlayerData` blob, a PlayerPrefs string, an ad-hoc JSON file —
 goes through a separate one-shot import pipeline that runs **before** the load path and commits
-a single normal save. Afterwards the slot loads like any other.
+a single normal save. Afterward the slot loads like any other.
 
 You load the legacy data yourself; the package never parses a foreign format:
 
@@ -288,15 +324,306 @@ else
 - `SerializableGuidExtensions.Compute(key)` mints a reproducible id from a string, since legacy data
   usually has no GUID. Optional — use `Guid.NewGuid()` if identity is arbitrary.
 
-### Compression / Encryption
+### Choosing a Storage Backend
 
-Wrap any storage in a `TransformStorage`. Transforms apply in declaration order on
-write and reverse order on read:
+`FileStorage` is the default and has no size ceiling worth naming. The other two do:
+
+| Backend              | Size ceiling                                    | Use it for                                      |
+|----------------------|-------------------------------------------------|-------------------------------------------------|
+| `FileStorage`        | 2 GB arena limit                                | anything — this is the default                  |
+| `PlayerPrefsStorage` | ~1.5 KB of save data advised; hard cap on Apple | settings, a slot index, small flags             |
+| `CloudSaveStorage`   | 1 GiB/file, **200 files/player**                | cloud sync; see [Cloud Storage](#cloud-storage) |
+
+All three can enumerate their slots for a load-game screen, but `PlayerPrefsStorage` only on some
+platforms and only with a postfix set — see [Listing PlayerPrefs slots](#listing-playerprefs-slots).
+
+#### PlayerPrefs value limits
+
+PlayerPrefs stores a **string**, and the payload is base64 — 4 characters stored per 3 bytes of
+save data. Every budget below is measured against the encoded string, so the usable payload is
+three quarters of it. Unity's own guidance is to keep a value at **2 KB or smaller** and write
+anything larger to a file, which is precisely what `FileStorage` does. That 2 KB stored budget is
+about **1.5 KB of actual save data**.
+
+| Platform          | What the platform enforces                                                           | What this package does |
+|-------------------|--------------------------------------------------------------------------------------|------------------------|
+| **tvOS**          | Apple warns at 512 KB and **terminates the app** at 1 MB                             | throws past 512 KB     |
+| **iOS**           | iOS 13+ rejects a write of ≥ 4 MiB (`CFPreferences`/`NSUserDefaults`)                | throws past 4 MiB      |
+| **Windows**       | registry bounded by available memory; Microsoft advises ≤ 2048 bytes                 | warns past 2 KB        |
+| **Android**       | `SharedPreferences` bounded by Java string size; the whole XML is parsed into memory | warns past 2 KB        |
+| **macOS / Linux** | no documented ceiling                                                                | warns past 2 KB        |
+| **Web**           | IndexedDB, quota decided by the browser                                              | warns past 2 KB        |
+
+Two different kinds of number, so two different reactions. The Apple limits are **real ceilings** —
+exceeding them loses the write or kills the process — so `WriteAsync` throws an `IOException`
+before PlayerPrefs is called, and that check is never gated. Everything else is guidance about
+load performance, so it logs once per key under `ENABLE_PERSISTENCE_INTEGRITY_CHECKS` and never
+throws; inventing a ceiling there would break projects that work today.
+
+> [!NOTE]
+> The Apple limits apply to the **whole defaults store**, not to one value, so passing the check is
+> necessary rather than sufficient — several values under the cap still add up. Nothing readable
+> from PlayerPrefs would let the check know. On those platforms, use `FileStorage` for save data of
+> any size.
+
+> [!NOTE]
+> The 1 MB figure often quoted for Web builds belonged to the long-removed Unity Web Player and does
+> not apply to WebGL. The real Web hazard is flushing, not size: PlayerPrefs reaches IndexedDB only
+> when the filesystem is synced, and a browser tab closing may not give Unity time. `Options.FlushOnWrite`
+> is on by default for that reason.
+
+### Configuring a Backend from the Inspector
+
+A storage is a live resource — it holds caches and a write gate, it is `IDisposable`, and its
+constructor may touch main-thread-only Unity APIs. So what gets serialized is not the storage but a
+**descriptor**: plain data that knows how to build one.
 
 ```csharp
-var storage = new TransformStorage(new FileStorage(), new Lz4Transform(), new AesTransform());
+public class SaveSettings : ScriptableObject
+{
+    [SerializeReference] public IStorageDescriptor storage;
+    [SerializeReference] public ISaveLayoutDescriptor layout;
+}
+
+// At startup — Create() returns a fresh instance every call, and the caller owns it.
+var storage = settings.storage.Create();
+var layout  = settings.layout.Create(storage);   // the layout owns the storage from here
+var manager = new SaveManager(new UnityJsonSerializer(), layout);
+```
+
+> [!NOTE]
+> Unity's built-in Inspector shows a `[SerializeReference]` field but offers no way to *choose*
+> which implementation goes in it. The package ships a picker for its own Save Viewer window, but
+> that attribute is internal — it is a minimal in-box tool, not an API. For your own assets, either
+> write a small `PropertyDrawer` over `TypeCache.GetTypesDerivedFrom<IStorageDescriptor>()`, or use
+> a package such as [SerializeReference Extensions](https://github.com/mackysoft/Unity-SerializeReferenceExtensions).
+> Everything below works regardless — the descriptors are ordinary serializable classes.
+
+| Descriptor                                                          | Builds                                     |
+|---------------------------------------------------------------------|--------------------------------------------|
+| `FileStorageDescriptor`                                             | `FileStorage` (root directory, extension)  |
+| `PlayerPrefsStorageDescriptor`                                      | `PlayerPrefsStorage` (postfix, options)    |
+| `TransformStorageDescriptor`                                        | `TransformStorage` — **nests**             |
+| `XorTransformDescriptor`, `AesCbcHmacTransformDescriptor`           | the shipped transforms                     |
+| `SingleFileSaveLayoutDescriptor`, `MultiFileSaveLayoutDescriptor`   | the shipped layouts                        |
+
+`TransformStorageDescriptor` holds descriptors of its own, so a whole
+`TransformStorage(FileStorage, Deflate, Aes)` chain is assembled in the Inspector. Because it builds
+transforms nothing else refers to, it takes ownership of them — disposing the storage releases the
+chain. See [Ownership](#3-ownership--threading-contracts) for the hand-written case, which does not.
+
+> [!IMPORTANT]
+> `AesCbcHmacTransformDescriptor` takes a **path to a key file**, never key bytes. A key typed into
+> an inspector field is written into the asset, and into whatever that asset is committed to. The
+> file is read only when the transform is built (so it may not exist on the machine editing the
+> asset) and the bytes are held in unmanaged memory and zeroed as soon as the subkeys are derived.
+
+### Listing Save Slots
+
+`SaveSlotBrowser` answers "what saves exist?" — enough for a load-game screen, and what the editor
+viewer is built on:
+
+```csharp
+var storage = new FileStorage();
+var layout  = new MultiFileSaveLayout(storage);
+var browser = new SaveSlotBrowser(storage, layout);
+
+var slots = new List<SaveSlotInfo>();
+await browser.PopulateAsync(slots);          // reads nothing — no save is opened
+
+foreach (var slot in slots)
+    Debug.Log($"{slot.Slot}: {slot.TotalBytes} bytes, {slot.KeyCount} files, {slot.ModifiedUtc}");
+
+// Only for the slot the player actually highlights:
+var header = await browser.ReadHeaderAsync(slots[0].Slot);
+
+if (header.Status == SaveSlotStatus.Ok)
+    Debug.Log($"{header.RecordCount} shards, written {header.WrittenUtc}");
+```
+
+**Two phases, on purpose.** `PopulateAsync` costs a directory walk and nothing more — sizes and
+write times come from the listing itself. `ReadHeaderAsync` costs a full read of that slot. Listing
+two hundred saves eagerly would read two hundred files to draw one screen, so decode headers lazily.
+
+| Piece              | Role                                                                  |
+|--------------------|-----------------------------------------------------------------------|
+| `IListableStorage` | Optional storage capability — "which keys do you hold?"               |
+| `StorageKeyInfo`   | One key: name, size, last-modified ticks                              |
+| `ISlotKeyMapper`   | Layout capability — "which slot does this key belong to?"             |
+| `SaveSlotBrowser`  | Composes the two; `SaveSlotInfo` per slot, `SaveSlotHeader` on demand |
+
+Listing is a **capability, not a requirement**. Check `storage is IListableStorage`, or the browser's
+`CanList`. `FileStorage` and `CloudSaveStorage` implement it; `TransformStorage` forwards to whatever
+it wraps (so `CanList` can be true while the call still fails). **`PlayerPrefsStorage` implements it
+on some platforms** — see below, because it is the one backend where `CanList` being true is not the
+whole answer.
+
+### Listing PlayerPrefs slots
+
+Unity exposes no key enumeration for PlayerPrefs on any platform, so `PlayerPrefsStorage` reads the
+store Unity itself writes to. Values still go through `PlayerPrefs`; the platform readers answer
+*which keys exist* and nothing else.
+
+| Platform                    | Store read                                     | Notes                                                   |
+|-----------------------------|------------------------------------------------|---------------------------------------------------------|
+| Windows (player + editor)   | Registry under `HKCU\Software\…`               | Editor and player use different branches; both handled  |
+| macOS                       | `NSUserDefaults` property list                 | Binary `bplist00`; file name probed across known shapes |
+| Linux                       | `~/.config/unity3d/<company>/<product>/prefs`  | Honours `XDG_CONFIG_HOME`                               |
+| Android                     | `SharedPreferences` `<package>.v2.playerprefs` | **Requires the Android PlayerPrefs Reader sample**      |
+| iOS / tvOS, WebGL, consoles | —                                              | `NotSupportedException`; use `FileStorage`              |
+
+```csharp
+var storage = new PlayerPrefsStorage(postfix: ".save");   // postfix is mandatory for listing
+var browser = new SaveSlotBrowser(storage, layout);
+await browser.PopulateAsync(slots);
+```
+
+> [!IMPORTANT]
+> **A non-empty postfix is required, and listing without one throws.** PlayerPrefs is a shared
+> namespace: with no postfix nothing separates your saves from Unity's own `unity.player_session_count`
+> or the game's audio settings, and every key in the store would come back as a save slot.
+
+Two consequences worth planning around. **`SizeBytes` and `ModifiedUtc` are 0** — measuring a size
+would mean reading every save's full payload just to draw a list, and no prefs store records a
+per-key modification time, so a slot list here shows names and nothing else. And on **Android the
+plugin sample is mandatory**: import *Android PlayerPrefs Reader* from Package Manager and **rebuild
+the APK**, since the helper is Java compiled into your build. Without it, `PopulateAsync` throws a
+message saying so. It exists because JNI hands strings back with no span view, so filtering in C#
+would allocate one string per *stored* key rather than per match; doing it in Java keeps that cost
+proportional to the number of saves you actually have.
+
+Both layouts implement `ISlotKeyMapper`, so the browser is normally built from the same storage and
+layout you gave the `SaveManager`. Under `MultiFileSaveLayout` a slot's shard files are folded into
+one entry, with `KeyCount` and `TotalBytes` covering the whole slot.
+
+> [!NOTE]
+> Header decoding consults no layout: every layout writes the envelope at offset 0 of the slot's own
+> key. Reading through a transform chain reverses it on the way, so compressed and encrypted saves
+> need nothing special. **Nothing but cancellation escapes `ReadHeaderAsync`** — every failure is
+> reported through `SaveSlotStatus` (`Corrupted`, `Foreign`, `UnsupportedVersion`, `Missing`,
+> `Unreadable`), because a browser has to survive one bad file in a folder. That includes a
+> nonsensical timestamp: `WrittenUtc` never throws, and `HasTimestamp` is false when the stored
+> value is not a date a `DateTime` can hold.
+
+**Concurrency.** A browser needs no wiring to be safe against a concurrent save. Serialisation
+happens one layer down, inside the storage, keyed by the resource itself — see
+[Threading Contracts](#3-ownership--threading-contracts) — so it holds even when the writer is a
+different storage instance in the same process, which is exactly what the Save Viewer is.
+
+#### Save Viewer window
+
+**Tools/Saesentsessis/Persistence/Save Viewer** puts the same browser behind an inspector. Pick a
+storage and a layout — the same [descriptors](#configuring-a-backend-from-the-inspector) you would
+put on a settings asset — press Refresh, and click a slot to decode its envelope header.
+
+The configuration is serialized on the window, so opening several viewers lets each point at a
+different backend — matching a project that runs several `SaveManager`s — and it survives domain
+reloads and editor restarts through the layout file. Resetting your window layout does clear it;
+the configuration is cheap to redo, so that is an accepted trade rather than a bug.
+
+### Compression / Encryption
+
+Wrap any storage in a `TransformStorage`. `IStorageTransform`s apply in declaration order on write
+and reverse order on read, so **compress first, then encrypt** — ciphertext does not compress:
+
+```csharp
+var storage = new TransformStorage(
+    new FileStorage(),
+    new DeflateTransform(),             // Apply runs in declaration order
+    new AesCbcHmacTransform(key));      // Reverse runs in reverse order
+
 var manager = new SaveManager(serializer, new SingleFileSaveLayout(storage));
 ```
+
+**The unit of work is one storage key, not one save.** `SingleFileSaveLayout` writes a whole save
+under one key, so a transform sees the entire packed buffer. `MultiFileSaveLayout` writes the
+envelope plus one key per shard, so the transform runs *N+1* times on individual shard blobs — which
+means worse compression ratios (small inputs) and, for encryption, per-file IV and tag overhead.
+
+#### Shipped transforms
+
+| Transform             | Dependency           | Notes                                                        |
+|-----------------------|----------------------|--------------------------------------------------------------|
+| `XorTransform`        | none                 | Obfuscation only, no security value. Its own inverse.        |
+| `DeflateTransform`    | none                 | `System.IO.Compression`. See the IL2CPP caveat below.        |
+| `AesCbcHmacTransform` | none                 | AES-256-CBC + HMAC-SHA256, encrypt-then-MAC.                 |
+| `LZ4Transform`        | K4os.Compression.LZ4 | `Samples~/LZ4Compression`. Fast, modest ratio, pure managed. |
+| `ZstdTransform`       | ZstdSharp.Port       | `Samples~/ZstdCompression`. Better ratio, slower.            |
+
+All three compression transforms frame their output as `[originalLength:4 LE][compressed bytes]`.
+LZ4 requires it (its decoder needs the output size up front); the others use it to size the output
+buffer and to verify the result.
+
+That prefix is **untrusted input** — it comes off disk, which means it comes from whoever last
+edited the file. Reserving from it directly is how a few hundred bytes turn into a multi-gigabyte
+allocation, so every decoder checks it against `TransformLimits` first:
+
+- the declared length must be within the format's maximum expansion for the bytes actually present
+  (Deflate 1032:1, LZ4 255:1, Zstd 1024:1), which keeps any reservation proportional to the file
+  someone really wrote;
+- `DeflateTransform` additionally never trusts the prefix at all. Deflate is self-terminating, so
+  decompression is driven by the stream and each reservation is capped at `TransformLimits.MaxReservation`
+  (2 MB). LZ4 and Zstd decode into an exactly-sized buffer and cannot grow incrementally, so for
+  them the ratio bound is the whole defence.
+
+> [!TIP]
+> Chaining `AesCbcHmacTransform` after compression removes the exposure entirely. `Reverse` runs
+> outermost-first, so the authentication tag is verified before a single compressed byte is
+> examined, and forging that tag needs the key. The envelope's own xxHash3 does **not** help here —
+> it is unkeyed, and it is checked only after the whole transform chain has already run.
+
+`AesCbcHmacTransform` writes `[IV:16][ciphertext][HMAC:32]`. The tag covers `IV || ciphertext` and is
+verified in constant time **before** anything is decrypted; a mismatch throws `SaveCorruptedException`.
+
+> [!WARNING]
+> On a shipped game, encryption here is **obfuscation, not secrecy** — the key travels inside the
+> build and can be extracted. What the HMAC does buy is genuine tamper *detection*: the envelope's
+> xxHash3 checksum is unkeyed, so anyone editing a save can simply recompute it, whereas forging the
+> HMAC requires the key. Never use this to protect data that must stay secret from the player.
+
+> [!NOTE]
+> `AesGcm` is deliberately **not** used: it compiles on every platform but throws
+> `PlatformNotSupportedException` at runtime on iOS, tvOS and WebGL.
+> Under IL2CPP, AES is reached by reflection and gets stripped — preserve it in `Assets/link.xml`:
+> ```xml
+> <linker>
+>   <assembly fullname="System.Core">
+>     <type fullname="System.Security.Cryptography.AesManaged" preserve="all" />
+>   </assembly>
+> </linker>
+> ```
+> Unity also has a historical report of `DeflateStream` losing bytes under IL2CPP. Round-trip a save
+> on your target platform before shipping `DeflateTransform`; the LZ4 sample is pure managed C# and
+> carries no such risk.
+
+#### Writing your own
+
+```csharp
+public sealed class MyTransform : IStorageTransform
+{
+    public void Apply(ReadOnlySpan<byte> src, IBufferWriter<byte> dst) { /* save direction */ }
+    public void Reverse(ReadOnlySpan<byte> src, IBufferWriter<byte> dst) { /* load direction */ }
+}
+```
+
+The contract is reversibility, not purity: `Reverse` must reconstruct the exact input of `Apply`,
+but `Apply` need not be deterministic — an encrypting transform is expected to emit a fresh IV per
+call. Implementations must be stateless between calls; `TransformStorage` runs one operation at a
+time per instance, so they need not be thread-safe.
+
+**Ownership:** a `TransformStorage` owns everything below it. Disposing one disposes the storage it
+wraps *and* every transform in its chain, so `using var storage = …` releases the lot.
+
+> [!IMPORTANT]
+> **A transform instance belongs to exactly one storage.** Do not hand the same one to two chains.
+> Transforms hold per-operation scratch state — the cipher's IV and arena, the decorator's own
+> ping-pong buffers — so two storages driving one instance would interleave through it and corrupt
+> both. Build a fresh transform per storage; `TransformStorageDescriptor` does exactly that on every
+> `Create()`.
+
+That rule is also what makes disposal unambiguous: there is only ever one owner, so a disposable
+transform (`AesCbcHmacTransform`, and `XorTransform` — it holds a native pattern buffer) is released
+exactly once and never leaks.
 
 ### Custom Serializers
 
@@ -328,16 +655,16 @@ Five more backends are provided as **optional integrations** — none is a hard 
 you pull in only what you use. Each maps `SerializableGuid` with no heap allocation where the
 format allows (raw bytes for binary formats, a stack-formatted hex string for JSON).
 
-| Backend            | Distribution        | GUID encoding            | Notes                                              |
-|--------------------|---------------------|--------------------------|----------------------------------------------------|
-| Unity `JsonUtility`| **built-in**        | two ulongs (JsonUtility) | Default. No dependencies.                           |
-| Newtonsoft JSON    | in-runtime (gated)  | hex string               | Auto-active when `com.unity.nuget.newtonsoft-json` is installed. Full contract control. |
-| System.Text.Json   | Sample              | hex string (stack)       | `Utf8JsonWriter` is buffer-native. Reflection → IL2CPP `link.xml`. |
-| MessagePack         | Sample              | raw 16 bytes             | Compact/fast. **Needs `mpc` generated resolvers for IL2CPP.** |
-| MemoryPack          | Sample              | raw unmanaged            | Fastest; buffer-native both ways. Shards must be `[MemoryPackable] partial`. |
-| protobuf-net        | Sample              | two fixed64              | Contract-based; auto-maps public members. Positional wire format. |
+| Backend             | Distribution       | GUID encoding            | Notes                                                                                   |
+|---------------------|--------------------|--------------------------|-----------------------------------------------------------------------------------------|
+| Unity `JsonUtility` | **built-in**       | two ulongs (JsonUtility) | Default. No dependencies.                                                               |
+| Newtonsoft JSON     | in-runtime (gated) | hex string               | Auto-active when `com.unity.nuget.newtonsoft-json` is installed. Full contract control. |
+| System.Text.Json    | Sample             | hex string (stack)       | `Utf8JsonWriter` is buffer-native. Reflection → IL2CPP `link.xml`.                      |
+| MessagePack         | Sample             | raw 16 bytes             | Compact/fast. **Needs `mpc` generated resolvers for IL2CPP.**                           |
+| MemoryPack          | Sample             | raw unmanaged            | Fastest; buffer-native both ways. Shards must be `[MemoryPackable] partial`.            |
+| protobuf-net        | Sample             | two fixed64              | Contract-based; auto-maps public members. Positional wire format.                       |
 
-> [!NOTE]
+> [!IMPORTANT]
 > `UnityJsonSerializer` and `NewtonsoftJsonSerializer` serialize Unity-style **fields**, including
 > private `[SerializeField]` ones — so the canonical shard shape (a private `id` behind a get-only
 > `Identifier`) round-trips out of the box. The other backends default to **public** members; if your
@@ -348,7 +675,7 @@ format allows (raw bytes for binary formats, a stack-formatted hex string for JS
 package is present — install the package and the serializer type simply appears, no manual setup.
 
 **Samples** are imported from the Package Manager (**Window → Package Manager → Unity Data Shards →
-Samples**). Each carries its own asmdef and a README with the exact install command for its backend
+Samples**). Each carries its own asmdef and a README with the exact installation guide for its backend
 DLL and any AOT caveats. They are copied into your project, so you can adapt them freely.
 
 ```csharp
@@ -380,6 +707,30 @@ await manager.SaveAsync("slot-1", store);
   reserved character (default `.`) when forming cloud keys. That character must not appear in your
   slot names (it is rejected if it does).
 
+### Cloud Save quotas
+
+Per player (there is no cap on the number of players):
+
+| Quota                | Value   | Checked                                   |
+|----------------------|---------|-------------------------------------------|
+| Total file storage   | 1 GiB   | by UGS                                    |
+| Single file size     | 1 GiB   | before upload, throws `IOException`       |
+| Number of files      | **200** | by UGS                                    |
+| Filename length      | 255     | on the incoming key, throws `ArgumentException` |
+
+> [!WARNING]
+> The **200-file cap is the one that bites, and it argues against `MultiFileSaveLayout` in the
+> cloud.** That layout spends one file per shard plus one for the envelope, so a slot of N shards
+> costs N+1 of the player's 200 — across every slot they own. Past roughly 199 shards in total the
+> save cannot be stored at all, and this package is comfortable with shard counts well above that.
+> `SingleFileSaveLayout` spends exactly one file per slot no matter how many shards it holds, and
+> the size quotas are generous enough that a single-file save will never approach them. Pair
+> multi-file with `FileStorage` locally and single-file with the cloud.
+
+The two quotas a single call can see — file size and filename length — are enforced client-side so
+you fail before spending the player's bandwidth. The running per-player totals are not visible
+without an extra round trip, so UGS reports those as a `CloudSaveException` when they are hit.
+
 ## Technical Deep Dive
 
 ### 1. The Arena
@@ -389,8 +740,22 @@ await manager.SaveAsync("slot-1", store);
 through an `IBufferWriter<byte>` facade. Blob boundaries are recorded as before/after
 write-length deltas into a blittable `ShardBlobRange[]`. The arena is pre-sized per
 slot from the previous save's payload, so the steady state never reallocates
-mid-serialization. Layouts receive `(envelope, payload, ranges)` and gather-write —
-single-file packing is a straight concatenation with no re-copy.
+mid-serialization. Layouts receive `(envelope, payload, ranges)` and gather-write, so no
+layout ever walks per-shard structures.
+
+**What the arena does not buy you is a copy-free write.** The payload arena is a borrowed
+view a layout cannot extend, and `IStorage.WriteAsync` takes one contiguous array — so any
+layout that puts bytes *in front of* shard data assembles that in a buffer of its own:
+
+|                        | copied per save          | peak extra memory       | atomicity             |
+|------------------------|--------------------------|-------------------------|-----------------------|
+| `SingleFileSaveLayout` | the whole payload, once  | ≈ the payload           | whole slot, one write |
+| `MultiFileSaveLayout`  | every written blob, once | the largest single blob | per file              |
+
+Both move the same bytes when every shard is dirty; they differ in peak memory and in what a
+crash can leave behind. Single-file's copy is structural, not an oversight: the envelope has
+to precede the payload in the file and its size is not known until serialization has finished,
+so there is nowhere to have written the payload that would already be in the right place.
 
 ### 2. Envelope Format v4
 
@@ -415,6 +780,7 @@ matched (so foreign data is rejected as foreign, not as a corrupt save), and bec
 *both* counts live in the fixed header, the decoder rejects impossible ones against
 the remaining byte count before allocating anything.
 
+> [!IMPORTANT]
 > **Breaking in 0.4.0** — format **v3 cannot be read**. Its version field sat outside
 > the checksummed region and its two counts were split across the variable-length type
 > table. Saves written by 0.3.x are not upgradable; delete them or re-generate.
@@ -422,7 +788,8 @@ the remaining byte count before allocating anything.
 ### 3. Ownership & Threading Contracts
 
 - `IStorage.WriteAsync` does **not** copy: the caller guarantees the buffer stays
-valid until the returned task completes. This makes the whole-payload write zero-copy.
+valid until the returned task completes, so the bytes go from the buffer to the medium
+untouched. Whether that buffer is itself a copy is the layout's business, not storage's.
 - `IStorage.TryReadAsync` reports missing keys via a `Found` flag — no exception cost,
 no extra `Exists` round trip.
 - With background serialization, the pipeline hops to the thread pool for the CPU-heavy
@@ -431,22 +798,48 @@ on exception and cancellation paths.
 - `SaveManager`, `ShardStore`, storages and layouts implement `IDisposable`. Disposing a
 `SaveManager` cascades to its layout and the storage that layout wraps, so a single
 `using var manager = …` releases the whole chain; `ShardStore.Dispose` in turn disposes
-any shard that is itself `IDisposable`. A `StorageReadResult` returned by a custom
-`IStorage` owns a `NativeArray` and must be disposed by whoever consumes it.
+any shard that is itself `IDisposable`, and `TransformStorage` disposes its transforms —
+each belongs to exactly one storage, so ownership is never ambiguous. A `StorageReadResult`
+reports a missing key as `Found == false`; when `Found` is true it owns a created
+`NativeArray` and must be disposed by whoever consumes it.
+- **Storage access is serialised per resource, process-wide.** Two `FileStorage` instances over one
+directory name the same files, so the lock is keyed by the resolved absolute path rather than held
+as a field on either instance — they meet on it without ever referencing each other. This is what
+makes the Save Viewer safe to refresh while Play Mode saves: it builds its own storage and could
+never have been handed the game's. Compiled in under `ENABLE_PERSISTENCE_SAFE_CONCURRENCY` and
+always in the editor; a player build without the define has no viewer, so the only caller left is
+your own code, which the define governs. Two *processes* over one directory remain out of scope.
+- **One operation in flight per slot.** The pipeline arenas, `PooledArrayBufferWriter` and
+`TransformStorage`'s ping-pong buffers are all single-operation by design, so overlapping
+`SaveAsync`/`LoadAsync`/`DeleteAsync` calls on the *same* slot are a contract violation. Different
+slots may run concurrently. What happens when the contract is broken depends on the build:
+`ENABLE_PERSISTENCE_SAFE_CONCURRENCY` serialises the callers with a real per-slot mutex (and does
+the same for `FileStorage`'s tmp/bak write sequence per key); otherwise the overlap costs nothing at
+runtime, and under `ENABLE_PERSISTENCE_INTEGRITY_CHECKS` it throws immediately so the mistake
+surfaces during development rather than as corruption later. Concurrency between two *processes*
+sharing a save directory is out of scope and is not defended against.
 
 ### 4. Safety Checks (optional)
 
 Two editor toggles under **Tools ▸ Saesentsessis ▸ Persistence** gate the pipeline's
 non-essential checks behind scripting defines, so a shipping build can drop them:
 
-| Menu item | Define | Guards |
-|-----------|--------|--------|
-| Integrity Checks | `ENABLE_PERSISTENCE_INTEGRITY_CHECKS` | Programmer-error asserts on your own data — buffer capacity, envelope string limits, `FileStorage` path/key validation (e.g. rejecting `../`). |
-| Safe Concurrency | `ENABLE_PERSISTENCE_SAFE_CONCURRENCY` | Concurrency guards inside the storage backends. |
+| Menu item        | Define                                | Guards                                                                                                                                                          |
+|------------------|---------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Integrity Checks | `ENABLE_PERSISTENCE_INTEGRITY_CHECKS` | Programmer-error asserts on your own data — buffer capacity, envelope count and string limits on **write**, value-type shard rejection, and the one-operation-per-slot detector. |
+| Safe Concurrency | `ENABLE_PERSISTENCE_SAFE_CONCURRENCY` | Real per-slot and per-storage-key locking, plus concurrent collections inside the storage backends.                                                              |
 
 Both default to **on** the first time the package loads in a project (recorded per-project,
-so a deliberate opt-out sticks). Validation of **untrusted data read from disk** — checksums,
-bounds, type-resolution — is *never* gated and runs in every build.
+so a deliberate opt-out sticks).
+
+Two categories are **never** gated and run in every build, because stripping them would strip a
+security or correctness boundary rather than an assert:
+
+- validation of **untrusted data read from disk** — checksums, bounds, count plausibility,
+  type-resolution, and the decompression limits described above;
+- **caller-input validation on public entry points** — a null or empty slot, a null transform in a
+  chain, and `FileStorage`'s path confinement (a key may not escape the save root, whether by `..`,
+  by a rooted path, or by any other route the platform's own normalization would resolve outward).
 
 ## Async Backend (UniTask optional)
 
@@ -479,7 +872,7 @@ Or manually add the scoped registry to your `Packages/manifest.json`:
 ```json
 {
   "dependencies": {
-    "com.saesentsessis.unity-data-shards": "0.4.0"
+    "com.saesentsessis.unity-data-shards": "0.5.0"
   },
   "scopedRegistries": [
     {
@@ -499,7 +892,7 @@ awaits workflow inside Unity context:
 ```json
 {
   "dependencies": {
-    "com.saesentsessis.unity-data-shards": "0.4.0",
+    "com.saesentsessis.unity-data-shards": "0.5.0",
     "com.cysharp.unitask": "2.0.0"
   },
   "scopedRegistries": [
@@ -518,7 +911,7 @@ awaits workflow inside Unity context:
 ### Method 2: Unity package installer
 
 1. Download the latest `.unitypackage` from [GitHub Releases page](https://github.com/Saesentsessis/Unity-Data-Shards/releases).
-   - _Direct Link:_ [Unity-Data-Shards-Installer.unitypackage](https://github.com/Saesentsessis/Unity-Data-Shards/releases/download/0.4.0/Unity-Data-Shards-Installer.unitypackage)
+   - _Direct Link:_ [Unity-Data-Shards-Installer.unitypackage](https://github.com/Saesentsessis/Unity-Data-Shards/releases/download/0.5.0/Unity-Data-Shards-Installer.unitypackage)
 2. Import the downloaded package into your Unity project.
 3. The installer will automatically configure OpenUPM in your `manifest.json` file and install the package dependencies.
 
@@ -526,21 +919,43 @@ awaits workflow inside Unity context:
 
 1. Open Unity and navigate to `Window` -> `Package Manager`.
 2. Click on the `+` icon in the top left corner and select `Add package from git URL...`.
-3. Enter the following URL (dependency repository):
-   ```
-   https://github.com/Cysharp/UniTask.git?path=src/UniTask/Assets/Plugins/UniTask
-   ```
-4. Click Add.
-5. Repeat all steps for the actual repository:
-   ```
+3. ```
    https://github.com/Saesentsessis/Unity-Data-Shards.git?path=Unity-Data-Shards/Assets/root
    ```
+4. Click Add.
 
 You can specify exact release version of this package like this:
 
 ```
-https://github.com/Saesentsessis/Unity-Data-Shards.git?path=Unity-Data-Shards/Assets/root#0.4.0
+https://github.com/Saesentsessis/Unity-Data-Shards.git?path=Unity-Data-Shards/Assets/root#0.5.0
 ```
+
+You can repeat all steps for the optional dependency repository:
+```
+https://github.com/Cysharp/UniTask.git?path=src/UniTask/Assets/Plugins/UniTask
+```
+
+## Contributing
+
+Pull requests are welcome and genuinely wanted. The whole package is built around swappable
+contracts, so the most valuable contributions are new implementations of them:
+
+- **Serializer backends** (`ISerializer`) — anything with an `IBufferWriter<byte>`-shaped API:
+  Odin Serializer, Ceras, FlatBuffers, Bond, a hand-rolled binary format.
+- **Storage backends** (`IStorage` / `IManagedStorage`) — Steam Cloud, PlayFab, Epic Online
+  Services, Google Play Games saved games, iCloud, a plain HTTP endpoint, an in-memory test double.
+- **Storage transforms** (`IStorageTransform`) — compression, encryption, integrity, or anything
+  else that is reversible.
+
+That list is not a fence. Bug reports, bug fixes, performance work, new layouts, migrations,
+tests, platform findings, typo corrections and documentation improvements are all appreciated —
+if it makes the package better, open a PR or an
+[issue](https://github.com/Saesentsessis/Unity-Data-Shards/issues).
+
+A few things that make a PR easy to merge: keep it focused on one change, match the surrounding
+code style, add tests for anything with behavior, and note the change in `CHANGELOG.md`. If you
+are unsure whether an idea fits, open an issue first and ask — that is cheaper than writing code
+in the wrong direction.
 
 ## Credits
 
