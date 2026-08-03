@@ -32,7 +32,7 @@ namespace Saesentsessis.Persistence.Tests
 		[UnityTest]
 		public IEnumerator RoundTrip_PreservesShardData([Values(0, 1, 10, 80, 1000)] int count) => AsyncTest.Run(async () =>
 		{
-			var manager = CreateManager(out _);
+			using var manager = CreateManager(out _);
 			var store = CreateShards(count);
 
 			await manager.SaveAsync(Slot, store);
@@ -53,7 +53,7 @@ namespace Saesentsessis.Persistence.Tests
 		[UnityTest]
 		public IEnumerator RoundTrip_PlainList_WorksWithoutShardStore() => AsyncTest.Run(async () =>
 		{
-			var manager = CreateManager(out _);
+			using var manager = CreateManager(out _);
 			var shards = new List<IDataShard> { new TestShard(Guid.NewGuid(), 42, "answer") };
 
 			await manager.SaveAsync(Slot, shards);
@@ -66,7 +66,7 @@ namespace Saesentsessis.Persistence.Tests
 		[UnityTest]
 		public IEnumerator SaveLoad_MissingSlot_ExistsFalse_LoadThrows() => AsyncTest.Run(async () =>
 		{
-			var manager = CreateManager(out _);
+			using var manager = CreateManager(out _);
 
 			Assert.IsFalse(await manager.ExistsAsync("nope"));
 
@@ -82,7 +82,7 @@ namespace Saesentsessis.Persistence.Tests
 		{
 			var serializer = new CountingSerializer();
 			var layout = new CapturingLayout { FullSnapshot = false };
-			var manager = new SaveManager(serializer, layout);
+			using var manager = new SaveManager(serializer, layout);
 			var store = CreateShards(10);
 
 			await manager.SaveAsync(Slot, store);
@@ -110,7 +110,7 @@ namespace Saesentsessis.Persistence.Tests
 		public IEnumerator EnvelopeCache_ReusedWhileGenerationUnchanged_InvalidatedByAdd() => AsyncTest.Run(async () =>
 		{
 			var layout = new CapturingLayout { FullSnapshot = true };
-			var manager = new SaveManager(new CountingSerializer(), layout);
+			using var manager = new SaveManager(new CountingSerializer(), layout);
 			var store = CreateShards(5);
 
 			await manager.SaveAsync(Slot, store);
@@ -133,7 +133,7 @@ namespace Saesentsessis.Persistence.Tests
 		public IEnumerator BackgroundSerialization_RoundTrips() => AsyncTest.Run(async () =>
 		{
 			var storage = new MemoryStorage();
-			var manager = new SaveManager(new CountingSerializer(background: true), new SingleFileSaveLayout(storage));
+			using var manager = new SaveManager(new CountingSerializer(background: true), new SingleFileSaveLayout(storage));
 			var store = CreateShards(20);
 
 			await manager.SaveAsync(Slot, store);
@@ -154,7 +154,7 @@ namespace Saesentsessis.Persistence.Tests
 			var migrations = new MigrationRegistry();
 			migrations.Register(new LegacyToModernMigration());
 
-			var manager = CreateManager(out _, migrations);
+			using var manager = CreateManager(out _, migrations);
 			var legacyId = Guid.NewGuid();
 			var shards = new List<IDataShard> { new LegacyShard(legacyId, 1234) };
 
@@ -174,7 +174,7 @@ namespace Saesentsessis.Persistence.Tests
 			var migrations = new MigrationRegistry();
 			migrations.Register(new TypedLegacyToModern());
 
-			var manager = CreateManager(out _, migrations);
+			using var manager = CreateManager(out _, migrations);
 			var legacyId = Guid.NewGuid();
 			await manager.SaveAsync(Slot, new List<IDataShard> { new LegacyShard(legacyId, 1234) });
 
@@ -201,7 +201,7 @@ namespace Saesentsessis.Persistence.Tests
 		public IEnumerator Builder_FromRegistryBuilder_AppliesTypedMigration() => AsyncTest.Run(async () =>
 		{
 			var storage = new MemoryStorage();
-			var manager = new SaveManagerBuilder()
+			using var manager = new SaveManagerBuilder()
 				.WithSerializer(new UnityJsonSerializer())
 				.WithLayout(new SingleFileSaveLayout(storage))
 				.WithMigrations(new MigrationRegistryBuilder().Add(new TypedLegacyToModern()))
@@ -224,7 +224,7 @@ namespace Saesentsessis.Persistence.Tests
 			var registry = new MigrationRegistry();
 			registry.Register(new LegacyToModernMigration());
 
-			var manager = new SaveManagerBuilder()
+			using var manager = new SaveManagerBuilder()
 				.WithSerializer(new UnityJsonSerializer())
 				.WithLayout(new SingleFileSaveLayout(storage))
 				.WithMigrations(registry)
@@ -258,7 +258,7 @@ namespace Saesentsessis.Persistence.Tests
 			migrations.Register(new LegacyToModernMigration(toVersion: 1));
 			migrations.Register(new ModernToLegacyCycleMigration());
 
-			var manager = CreateManager(out _, migrations);
+			using var manager = CreateManager(out _, migrations);
 			await manager.SaveAsync(Slot, new List<IDataShard> { new LegacyShard(Guid.NewGuid(), 1) });
 
 			var threw = false;
@@ -275,7 +275,7 @@ namespace Saesentsessis.Persistence.Tests
 			// Chain stops at ModernShard v1, but its schema declares v2 -> broken.
 			migrations.Register(new LegacyToModernMigration(toVersion: 1));
 
-			var manager = CreateManager(out _, migrations);
+			using var manager = CreateManager(out _, migrations);
 			await manager.SaveAsync(Slot, new List<IDataShard> { new LegacyShard(Guid.NewGuid(), 1) });
 
 			var threw = false;

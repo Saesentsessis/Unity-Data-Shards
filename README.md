@@ -16,9 +16,10 @@ modeled as a flat set of **shards** — GUID-identified units serialized indepen
 flowing through a zero-copy arena pipeline into pluggable serializers, layouts, and
 storage backends.
 
-Two native/managed (depending on backend) pipeline allocations per save — the arena and the
-range array — regardless of shard count; layouts add one assembly buffer on top. No exact-size
-buffer contracts. No main-thread serialization stalls.
+One payload-sized allocation per save — the arena — regardless of shard count, plus a bitmask of
+the dirty set. Shards are serialized into their final position, so the recommended configuration
+copies the payload zero times on its way to disk. No exact-size buffer contracts. No main-thread
+serialization stalls.
 
 ![Logo](resources/images/Logo.png)
 
@@ -39,9 +40,10 @@ longer exists.
 
 ```text
 IDataShard[] ──► ISerializer ──► arena (NativeList<byte> / pooled byte[])
+                                   │  layout framing reserved in place,
                                    │  + ShardBlobRange[] (id, offset, length)
                                    ▼
-                              ISaveLayout  (single-file gather-write / multi-file)
+                              ISaveLayout  (fills the reservations — no payload copy)
                                    │  envelope codec v4 + xxHash3 checksum
                                    ▼
                           [TransformStorage]  (optional compression/encryption chain)
@@ -52,9 +54,10 @@ IDataShard[] ──► ISerializer ──► arena (NativeList<byte> / pooled by
 ## Core Features
 
 - **Arena Pipeline:** all shard bytes land in one contiguous buffer indexed by
-blittable `(id, offset, length)` ranges. The pipeline performs **two** native allocations
-per save whatever the shard count, and the layout one more to assemble its output;
-disposal is a handful of frees instead of one per shard.
+blittable `(id, offset, length)` ranges. **One** payload-sized allocation per save whatever the
+shard count — the range array is reused per slot, and layouts reserve their framing inside the
+arena rather than assembling in a buffer of their own. Disposal is a couple of frees instead of one
+per shard.
 - **`IBufferWriter<byte>` Serializer Contract:** no exact-size returns, no pre-measure
 pass, no intermediate copies. Any writer-based serializer (MessagePack-CSharp,
 `Utf8JsonWriter`, custom binary) plugs in directly.
@@ -81,8 +84,9 @@ envelope's unkeyed checksum cannot — anyone can recompute a checksum.
 the *stored type name*, so schema upgrades can reshape fields and rename types even
 after the legacy class was deleted.
 - **Crash-Safe File Storage:** atomic tmp/bak write dance with automatic backup
-restore, reads through `AsyncReadManager` directly into unmanaged memory — no
-thread-pool thread blocked on I/O, no managed intermediate.
+restore. Reads go through `AsyncReadManager` straight into unmanaged memory — no managed
+intermediate and no thread blocked on the transfer. Writes stream from that same unmanaged buffer
+on a pool thread, so nothing is copied and the main thread is never held.
 - **Transform Chain:** `TransformStorage` decorates any storage backend with a
 reversible `IStorageTransform` chain — zero changes to the manager or layouts.
 Dependency-free `DeflateTransform`, `AesCbcHmacTransform` (AES-256-CBC + HMAC-SHA256,
@@ -339,6 +343,32 @@ else
 All three can enumerate their slots for a load-game screen, but `PlayerPrefsStorage` only on some
 platforms and only with a postfix set — see [Listing PlayerPrefs slots](#listing-playerprefs-slots).
 
+#### WebGL
+
+`FileStorage` is the backend to use on WebGL, and it is handled specially because the platform
+needs it to be. Emscripten's filesystem lives in RAM: a write is instantly visible and instantly
+gone when the tab closes, unless something mirrors it into IndexedDB. Unity only does that on
+application quit, which a browser has no reliable event for.
+
+This package syncs after every write and delete, and pulls IndexedDB back in before the first read,
+so a completed `WriteAsync` means durable rather than "in memory". Nothing to call and nothing to
+configure — the plugin ships with the package.
+
+> [!IMPORTANT]
+> **Saves do not survive a redeploy unless you pin the path.**
+> `Application.persistentDataPath` on WebGL is `/idbfs/<md5 of the page's directory URL>`, so
+> serving the build from a new URL — which itch.io and most CI deploys do on *every* upload — gives
+> you a different directory and orphans every existing save. The data is still in IndexedDB; the
+> game is looking somewhere else.
+>
+> Pass a fixed root under `/idbfs/` to pin it:
+> ```csharp
+> var storage = new FileStorage("/idbfs/your-game-a7f3c1");   // any stable, unique id
+> ```
+> The package mounts that path itself, since Unity only mounts the one it computed. Choose the id
+> once and never change it — changing it orphans saves exactly like the URL does. A root that is
+> neither `persistentDataPath` nor under `/idbfs/` is memory-only, and logs a warning saying so.
+
 #### PlayerPrefs value limits
 
 PlayerPrefs stores a **string**, and the payload is base64 — 4 characters stored per 3 bytes of
@@ -514,7 +544,7 @@ different storage instance in the same process, which is exactly what the Save V
 
 #### Save Viewer window
 
-**Tools/Saesentsessis/Persistence/Save Viewer** puts the same browser behind an inspector. Pick a
+**Window/Saesentsessis/Persistence/Save Viewer** puts the same browser behind an inspector. Pick a
 storage and a layout — the same [descriptors](#configuring-a-backend-from-the-inspector) you would
 put on a settings asset — press Refresh, and click a slot to decode its envelope header.
 
@@ -561,7 +591,7 @@ edited the file. Reserving from it directly is how a few hundred bytes turn into
 allocation, so every decoder checks it against `TransformLimits` first:
 
 - the declared length must be within the format's maximum expansion for the bytes actually present
-  (Deflate 1032:1, LZ4 255:1, Zstd 1024:1), which keeps any reservation proportional to the file
+  (Deflate 1032:1, LZ4 255:1, Zstd 32768:1), which keeps any reservation proportional to the file
   someone really wrote;
 - `DeflateTransform` additionally never trusts the prefix at all. Deflate is self-terminating, so
   decompression is driven by the stream and each reservation is capped at `TransformLimits.MaxReservation`
@@ -713,12 +743,12 @@ await manager.SaveAsync("slot-1", store);
 
 Per player (there is no cap on the number of players):
 
-| Quota                | Value   | Checked                                   |
-|----------------------|---------|-------------------------------------------|
-| Total file storage   | 1 GiB   | by UGS                                    |
-| Single file size     | 1 GiB   | before upload, throws `IOException`       |
-| Number of files      | **200** | by UGS                                    |
-| Filename length      | 255     | on the incoming key, throws `ArgumentException` |
+| Quota              | Value   | Checked                                         |
+|--------------------|---------|-------------------------------------------------|
+| Total file storage | 1 GiB   | by UGS                                          |
+| Single file size   | 1 GiB   | before upload, throws `IOException`             |
+| Number of files    | **200** | by UGS                                          |
+| Filename length    | 255     | on the incoming key, throws `ArgumentException` |
 
 > [!WARNING]
 > The **200-file cap is the one that bites, and it argues against `MultiFileSaveLayout` in the
@@ -733,31 +763,101 @@ The two quotas a single call can see — file size and filename length — are e
 you fail before spending the player's bandwidth. The running per-player totals are not visible
 without an extra round trip, so UGS reports those as a `CloudSaveException` when they are hit.
 
+## Performance
+
+Every configuration below writes the same bytes; they differ in how much memory it takes to get
+them there. Figures are for a save of **100 shards × 1 KB** (~105 KB on disk), counting every
+buffer the pipeline allocates from `IDataShard` to the medium. "Copies" means payload-sized
+memcpys, excluding the write to the medium itself.
+
+| Serializer                  | Layout      | Storage              | Allocated  | Copies |
+|-----------------------------|-------------|----------------------|------------|--------|
+| buffer-native or Newtonsoft | single-file | `FileStorage`        | **105 KB** | **0**  |
+| buffer-native or Newtonsoft | single-file | `CloudSaveStorage`   | 105 KB     | 0      |
+| buffer-native or Newtonsoft | multi-file  | `FileStorage`        | 103 KB     | 0      |
+| buffer-native or Newtonsoft | single-file | `PlayerPrefsStorage` | 383 KB     | 1×     |
+| `UnityJsonSerializer`       | single-file | `FileStorage`        | 305 KB     | 1×     |
+| `UnityJsonSerializer`       | multi-file  | `PlayerPrefsStorage` | 578 KB     | 2×     |
+
+**Buffer-native** means `MemoryPack`, `MessagePack`, `System.Text.Json` or `protobuf-net` — anything
+writing through `IBufferWriter<byte>`. `NewtonsoftJsonSerializer` joins them: it encodes UTF-8
+straight into the arena. All five are byte-for-byte identical in cost.
+
+Three rules cover most of it:
+
+- **Single-file + `FileStorage` + a buffer-native serializer is the cheapest path**, and reaches the
+  theoretical minimum: one buffer the size of the save, zero payload copies. The arena the shards
+  are serialized into *is* the file handed to storage.
+- **`UnityJsonSerializer` costs roughly 3× the alternatives.** `JsonUtility` returns a `string`, so
+  every shard is copied to UTF-16 and encoded back. There is no streaming API to avoid it. It is a
+  fine default for small saves and the wrong choice for large ones.
+- **`PlayerPrefsStorage` adds ~2.67× the save size**, because `SetString` takes a `string` and
+  base64 in UTF-16 is four chars per three bytes. Nothing in this package can improve on that — use
+  `FileStorage` for payloads of any size.
+
+One case where totals mislead: with `PlayerPrefsStorage`, **multi-file has a far lower peak** than
+single-file. Single-file builds one string the size of the whole save; multi-file builds one small
+string per shard and releases it. On iOS and tvOS that peak is what the platform's defaults-store
+limit measures, so multi-file is the safer pairing there despite similar totals.
+
+> [!NOTE]
+> Per-combination numbers for all 36 serializer × layout × storage pairings, the theoretical minima
+> they are measured against, and how each figure is derived are in
+> [docs/performance-assesment.md](docs/performance-assesment.md). The values there are computed from
+> the source rather than profiled, so each is traceable to a specific allocation site.
+
 ## Technical Deep Dive
 
 ### 1. The Arena
 
 `SaveManager` serializes every captured shard into one growable buffer
-(`NativeList<byte>` on the unmanaged pipeline, `ArrayPool<byte>` on the managed one)
-through an `IBufferWriter<byte>` facade. Blob boundaries are recorded as before/after
-write-length deltas into a blittable `ShardBlobRange[]`. The arena is pre-sized per
-slot from the previous save's payload, so the steady state never reallocates
-mid-serialization. Layouts receive `(envelope, payload, ranges)` and gather-write, so no
-layout ever walks per-shard structures.
+(`NativeList<byte>` on the unmanaged pipeline, a pooled `byte[]` on the managed one) through an
+`IBufferWriter<byte>` facade. Blob boundaries are recorded as before/after write-length deltas
+into a blittable `NativeArray<ShardBlobRange>`, which is **kept per slot and reused** rather than
+allocated per save. The arena is pre-sized from the previous save's written length, so the steady
+state never reallocates mid-serialization.
 
-**What the arena does not buy you is a copy-free write.** The payload arena is a borrowed
-view a layout cannot extend, and `IStorage.WriteAsync` takes one contiguous array — so any
-layout that puts bytes *in front of* shard data assembles that in a buffer of its own:
+**The shards are serialized into their final position.** Before anything is written, the layout
+declares how much room it needs in front of the data:
 
-|                        | copied per save          | peak extra memory       | atomicity             |
-|------------------------|--------------------------|-------------------------|-----------------------|
-| `SingleFileSaveLayout` | the whole payload, once  | ≈ the payload           | whole slot, one write |
-| `MultiFileSaveLayout`  | every written blob, once | the largest single blob | per file              |
+|                        | `HeaderReservation`                        | `BlobReservation`        |
+|------------------------|--------------------------------------------|--------------------------|
+| `SingleFileSaveLayout` | `ExactEncodedSize(envelope) + 4 + 24N + 4` | 0                        |
+| `MultiFileSaveLayout`  | 0                                          | 8 (the per-file xxHash3) |
 
-Both move the same bytes when every shard is dirty; they differ in peak memory and in what a
-crash can leave behind. Single-file's copy is structural, not an oversight: the envelope has
-to precede the payload in the file and its size is not known until serialization has finished,
-so there is nowhere to have written the payload that would already be in the right place.
+The manager advances the arena past those gaps as it serializes, so the layout only has to fill
+them afterwards. Single-file writes its envelope, range block and payload length into the head and
+hands storage **the same buffer** — the arena *is* the file. Multi-file writes each blob's hash
+into the eight bytes ahead of it and hands storage a `GetSubArray` view spanning both. Neither
+copies the payload.
+
+> [!NOTE]
+> **Writing your own `ISaveLayout`?** Both members are default interface implementations returning
+> `0`, so a layout that ignores them behaves exactly as it did before they existed — there is
+> nothing to add. Override them only to claim space you intend to fill. Two consequences if you do:
+> blob offsets in `ranges` are **absolute within the buffer**, so they already include your header,
+> and the buffer handed to `WriteAsync` arrives with the gaps present rather than needing to be
+> assembled. Calling `SingleFileSaveLayout.WriteAsync` or `MultiFileSaveLayout.WriteAsync` directly
+> with a buffer of your own is the one thing that changed: they now expect those reservations.
+
+That the envelope must precede the payload never forced a copy; it only forced its encoded size to
+be known exactly before serialization, which `EnvelopeCodec.ExactEncodedSize` supplies. (A *bound*
+will not do — the slack would become a gap the format cannot express.)
+
+**What a save actually allocates**, steady state, ignoring the medium:
+
+|                        | per save                                |
+|------------------------|-----------------------------------------|
+| Arena                  | one buffer, the size of what is written |
+| Blob ranges            | none — reused per slot                  |
+| Dirty-set bitmask      | `N` bits                                |
+| `SingleFileSaveLayout` | nothing                                 |
+| `MultiFileSaveLayout`  | one envelope-sized buffer               |
+
+The layouts still differ, just not in copies: single-file peaks at the whole save and commits it in
+one atomic write; multi-file peaks the same but writes `N+1` files, so a crash can leave a
+mixed-generation slot. See [Performance](#performance) for what each combination costs, and
+[docs/performance-assesment.md](docs/performance-assesment.md) for the derivation.
 
 ### 2. Envelope Format v4
 
@@ -791,7 +891,11 @@ the remaining byte count before allocating anything.
 
 - `IStorage.WriteAsync` does **not** copy: the caller guarantees the buffer stays
 valid until the returned task completes, so the bytes go from the buffer to the medium
-untouched. Whether that buffer is itself a copy is the layout's business, not storage's.
+untouched. Since the shipped layouts write into the arena rather than assembling elsewhere, that
+buffer is the one the serializer wrote into — `FileStorage` streams it straight from unmanaged
+memory, and `CloudSaveStorage` wraps it in an `UnmanagedMemoryStream`. `PlayerPrefsStorage` is the
+exception, and not by choice: `SetString` takes a `string`, so the payload is base64-encoded into
+one.
 - `IStorage.TryReadAsync` reports missing keys via a `Found` flag — no exception cost,
 no extra `Exists` round trip.
 - With background serialization, the pipeline hops to the thread pool for the CPU-heavy
@@ -823,7 +927,7 @@ sharing a save directory is out of scope and is not defended against.
 
 ### 4. Safety Checks (optional)
 
-Two editor toggles under **Tools ▸ Saesentsessis ▸ Persistence** gate the pipeline's
+Two editor toggles under **Tools/Saesentsessis/Persistence** gate the pipeline's
 non-essential checks behind scripting defines, so a shipping build can drop them:
 
 | Menu item        | Define                                | Guards                                                                                                                                                          |
@@ -858,6 +962,7 @@ way; `SaveManager.SaveAsync`/`LoadAsync` return `UniTask` or `Task` accordingly.
 - [`com.unity.collections`](https://docs.unity3d.com/Packages/com.unity.collections@latest) **2.1.4** or newer
 - [`com.unity.burst`](https://docs.unity3d.com/Packages/com.unity.burst@latest) **1.8.0** or newer
 - *(optional)* [`com.cysharp.unitask`](https://github.com/Cysharp/UniTask) **2.0.0** or newer — enables the UniTask backend
+- *(optional)* [`com.unity.services.cloudsave`](https://docs.unity.com/ugs/manual/cloud-save/manual) **3.0.0** or newer — enables `CloudSaveStorage`, which uploads through that version's `SaveAsync(string, Stream)` overload
 
 ## Installation
 
@@ -874,7 +979,7 @@ Or manually add the scoped registry to your `Packages/manifest.json`:
 ```json
 {
   "dependencies": {
-    "com.saesentsessis.unity-data-shards": "0.5.0"
+    "com.saesentsessis.unity-data-shards": "0.6.0"
   },
   "scopedRegistries": [
     {
@@ -894,7 +999,7 @@ awaits workflow inside Unity context:
 ```json
 {
   "dependencies": {
-    "com.saesentsessis.unity-data-shards": "0.5.0",
+    "com.saesentsessis.unity-data-shards": "0.6.0",
     "com.cysharp.unitask": "2.0.0"
   },
   "scopedRegistries": [
@@ -913,7 +1018,7 @@ awaits workflow inside Unity context:
 ### Method 2: Unity package installer
 
 1. Download the latest `.unitypackage` from [GitHub Releases page](https://github.com/Saesentsessis/Unity-Data-Shards/releases).
-   - _Direct Link:_ [Unity-Data-Shards-Installer.unitypackage](https://github.com/Saesentsessis/Unity-Data-Shards/releases/download/0.5.0/Unity-Data-Shards-Installer.unitypackage)
+   - _Direct Link:_ [Unity-Data-Shards-Installer.unitypackage](https://github.com/Saesentsessis/Unity-Data-Shards/releases/download/0.6.0/Unity-Data-Shards-Installer.unitypackage)
 2. Import the downloaded package into your Unity project.
 3. The installer will automatically configure OpenUPM in your `manifest.json` file and install the package dependencies.
 
@@ -929,13 +1034,35 @@ awaits workflow inside Unity context:
 You can specify exact release version of this package like this:
 
 ```
-https://github.com/Saesentsessis/Unity-Data-Shards.git?path=Unity-Data-Shards/Assets/root#0.5.0
+https://github.com/Saesentsessis/Unity-Data-Shards.git?path=Unity-Data-Shards/Assets/root#0.6.0
 ```
 
 You can repeat all steps for the optional dependency repository:
 ```
 https://github.com/Cysharp/UniTask.git?path=src/UniTask/Assets/Plugins/UniTask
 ```
+
+## Upcoming Changes
+
+Rough sketches, not commitments — anything here may change shape or not ship at all.
+
+- Storage integrations. All four are key→bytes stores that `IStorage` already fits; what each of
+  them adds is conflict resolution between devices, which the interface has no concept of today.
+  - [ ] Steam Cloud
+  - [ ] Google Play Games (Saved Games)
+  - [ ] Epic Online Services (Player Data Storage)
+  - [ ] PlayFab (Entity Files)
+- Serializer integrations.
+  - [ ] Odin Serializer
+  - [ ] FlatBuffers, via [FlatSharp](https://github.com/jamescourtney/FlatSharp)'s attribute-driven
+    contracts — the official `flatc`-generated API is schema-first and exposes nothing an
+    `ISerializer` could be implemented against.
+- [ ] **Layout-driven serialization.** Invert the manager/layout relationship so a layout pulls one
+  shard at a time instead of being handed a full arena. This is what would bring
+  `MultiFileSaveLayout` from 47× its theoretical floor down to it — see
+  [docs/performance-assesment.md](../../../docs/performance-assesment.md).
+- [ ] **Import pipeline without a hard `SaveManager` dependency.** The pipeline should take objects
+  and emit ready shards; persisting them through `SaveManager` becomes an optional final step.
 
 ## Contributing
 

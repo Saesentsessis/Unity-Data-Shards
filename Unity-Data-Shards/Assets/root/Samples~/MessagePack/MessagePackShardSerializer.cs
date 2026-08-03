@@ -1,7 +1,6 @@
 using System;
 using System.Buffers;
 using MessagePack;
-using MessagePack.Resolvers;
 using Saesentsessis.Persistence.Core;
 
 namespace Saesentsessis.Persistence.Serialization.MessagePack

@@ -70,38 +70,37 @@ namespace Saesentsessis.Persistence.Layout
 		// Incremental by design: SaveManager passes only dirty blobs.
 		public bool RequiresFullSnapshot => false;
 
+		/// <inheritdoc />
+		/// <remarks>
+		/// Eight bytes before every blob, for the per-file checksum. Reserving them inside the arena
+		/// is what lets a shard file be written without a copy: the hash goes into the gap and the
+		/// gap plus its blob are already contiguous.
+		/// </remarks>
+		public int BlobReservation => HashPrefixSize;
+
 		public async TaskType WriteAsync(string slot, SaveEnvelope envelope, NativeArray<byte> payload,
 			NativeArray<ShardBlobRange> ranges, CancellationToken cancellation = default)
 		{
-			var maxBlobLength = 0;
-
-			for (var i = 0; i < ranges.Length; i++)
-				if (ranges[i].Length > maxBlobLength)
-					maxBlobLength = ranges[i].Length;
-
-			// One scratch arena reused for every shard file and the envelope; each write
-			// is awaited before the next mutation, satisfying the IStorage lifetime rule.
-			// Sized for whichever of the two is larger — the envelope is written into this same
-			// buffer, and for a slot with many small shards it is by far the bigger of them.
-			var scratch = new NativeListBufferWriter(
-				math.max(HashPrefixSize + maxBlobLength, math.max(EnvelopeCodec.MaxEncodedSize(envelope), 256)),
-				Allocator.Persistent);
+			// The envelope is the only thing this layout materialises; every shard file is a view
+			// into the arena the shards were serialized into.
+			var envelopeBuffer = new NativeListBufferWriter(
+				EnvelopeCodec.MaxEncodedSize(envelope), Allocator.Persistent);
 
 			try
 			{
 				// Shard files first — the envelope below is the commit point.
 				foreach (var range in ranges)
 				{
-					FrameShardFile(payload, range, scratch);
-					await _storage.WriteAsync(BuildShardKey(slot, range.Id), scratch.AsArray(), cancellation);
+					var file = FrameShardFile(payload, range);
+					await _storage.WriteAsync(BuildShardKey(slot, range.Id), file, cancellation);
 				}
 
-				EncodeEnvelope(envelope, scratch);
-				await _storage.WriteAsync(slot, scratch.AsArray(), cancellation);
+				EncodeEnvelope(envelope, envelopeBuffer);
+				await _storage.WriteAsync(slot, envelopeBuffer.AsArray(), cancellation);
 			}
 			finally
 			{
-				scratch.Dispose();
+				envelopeBuffer.Dispose();
 			}
 
 			// Strictly after the commit: leaking a file is recoverable, dangling a committed
@@ -318,15 +317,32 @@ namespace Saesentsessis.Persistence.Layout
 				stored[i] = records[i].Id;
 		}
 
-		private static void FrameShardFile(NativeArray<byte> payload, in ShardBlobRange range, NativeListBufferWriter scratch)
+		/// <summary>
+		/// Writes the blob's checksum into the eight bytes reserved before it and returns the
+		/// <c>[hash][blob]</c> file as a view over the arena.
+		/// </summary>
+		/// <remarks>
+		/// No copy: the reservation put the gap and the blob next to each other while the shard was
+		/// being serialized, so the file already exists in the arena and only the hash is missing.
+		/// <see cref="NativeArray{T}.GetSubArray"/> aliases that memory rather than duplicating it,
+		/// and the arena outlives the awaited write, which is the same lifetime rule
+		/// <see cref="IStorage.WriteAsync"/> already states.
+		/// </remarks>
+		private static NativeArray<byte> FrameShardFile(NativeArray<byte> payload, in ShardBlobRange range)
 		{
-			var blob = payload.AsReadOnlySpan().Slice(range.Offset, range.Length);
+			var start = range.Offset - HashPrefixSize;
 
-			scratch.Clear();
-			var span = scratch.GetSpan(HashPrefixSize + blob.Length);
-			BinaryPrimitives.WriteUInt64LittleEndian(span, Hash(blob));
-			blob.CopyTo(span[HashPrefixSize..]);
-			scratch.Advance(HashPrefixSize + blob.Length);
+			if (start < 0 || range.Offset + range.Length > payload.Length)
+				throw new InvalidOperationException(
+					$"[MultiFileSaveLayout] Blob at offset {range.Offset} has no room for its {HashPrefixSize}-byte " +
+					"checksum prefix. The pipeline did not honour BlobReservation.");
+
+			var file = payload.GetSubArray(start, HashPrefixSize + range.Length);
+			var span = file.AsSpan();
+
+			BinaryPrimitives.WriteUInt64LittleEndian(span, Hash(span[HashPrefixSize..]));
+
+			return file;
 		}
 
 		private static void EncodeEnvelope(in SaveEnvelope envelope, NativeListBufferWriter scratch)

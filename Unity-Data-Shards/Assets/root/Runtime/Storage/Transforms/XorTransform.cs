@@ -66,7 +66,7 @@ namespace Saesentsessis.Persistence.Storage.Transforms
 		public XorTransform(ReadOnlySpan<byte> pattern)
 		{
 			if (pattern.Length == 0 || IsZeroedOut(pattern))
-				throw new ArgumentException("An array of bytes should is zero length or it's content zeroed out.", nameof(pattern));
+				throw new ArgumentException("An array of bytes is zero length or it's content zeroed out.", nameof(pattern));
 			
 			_pattern = new NativeArray<byte>(pattern.Length, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
 			pattern.CopyTo(_pattern.AsSpan());

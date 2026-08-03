@@ -1,7 +1,7 @@
-﻿using System;
-using System.Buffers;
-using MessagePack;
+﻿using MessagePack;
+using MessagePack.Formatters;
 using MessagePack.Resolvers;
+using Saesentsessis.Persistence.Core;
 
 namespace Saesentsessis.Persistence.Serialization.MessagePack
 {
@@ -28,7 +28,7 @@ namespace Saesentsessis.Persistence.Serialization.MessagePack
 			{
 				if (typeof(T) == typeof(SerializableGuid))
 				{
-					Formatter = new SerializableGuidMessagePackFormatter();
+					Formatter = new SerializableGuidMessagePackFormatter() as IMessagePackFormatter<T>;
 					return;
 				}
 

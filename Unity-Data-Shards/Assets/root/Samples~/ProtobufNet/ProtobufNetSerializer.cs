@@ -37,26 +37,20 @@ namespace Saesentsessis.Persistence.Serialization.ProtobufNet
 		{
 			EnsureRegistered(type);
 
-			// protobuf-net v3: buffer-native, appends straight into the arena.
-			var state = ProtoBuf.ProtoWriter.State.Create(writer, _model);
-			try
-			{
-				_model.Serialize(ref state, value);
-			}
-			finally
-			{
-				state.Dispose();
-			}
+			// protobuf-net v3: buffer-native, appends straight into the arena. The IBufferWriter
+			// overload manages its own writer state, so there is nothing to create or dispose here.
+			_model.Serialize(writer, value, null);
 		}
 
 		public object Deserialize(ReadOnlySpan<byte> data, Type type)
 		{
 			EnsureRegistered(type);
 
-			// ReadOnlyMemory convenience is the most stable v3 non-generic read path; the span
-			// is copied once (protobuf-net's ref-struct reader state cannot capture a bare span
-			// from a non-async caller safely here).
-			return _model.Deserialize((ReadOnlyMemory<byte>)data.ToArray(), null, type);
+			// Span-native, so the payload is read straight out of the pipeline's buffer. Note the
+			// argument order: the type-first overload takes (type, source, value, userState) — the
+			// ReadOnlyMemory one is (source, type, value, userState), and mixing the two up makes
+			// protobuf-net infer a contract for System.RuntimeType instead of the shard.
+			return _model.Deserialize(type, data, null, null);
 		}
 
 		/// <summary>Registers a shard type with public-member inference (protobuf-net has no runtime ImplicitFields toggle).</summary>

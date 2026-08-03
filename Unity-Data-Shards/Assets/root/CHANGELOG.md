@@ -5,6 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-08-03
+
+A pipeline pass that removes every payload copy the package was making for its own convenience.
+Per-configuration figures are in [performance-assesment.md](../../../docs/performance-assesment.md).
+All integrations and samples are now verified by a test coverage.
+
+### Changed
+
+- **BREAKING (custom pipelines only):** `ISaveLayout` gained `HeaderReservation(in SaveEnvelope, int)` and `BlobReservation` — a layout declares the space it needs *in front of* the shard data, and shards are then serialized straight into their final position. Both are default interface implementations returning 0, so **implementing `ISaveLayout` is unaffected**. What breaks is *calling* `SingleFileSaveLayout.WriteAsync` / `MultiFileSaveLayout.WriteAsync` with your own buffer: they now expect the reservations present, and blob offsets in `ranges` are absolute within that buffer, so they include the header. Going through `SaveManager` needs no change.
+- **No layout copies the payload any more.** Single-file fills the reserved head of the arena it was given and hands storage that same memory — the arena *is* the file; multi-file writes each blob's hash into the eight reserved bytes ahead of it. The envelope-before-payload ordering never forced a copy, only an exact envelope size, which `ExactEncodedSize` now supplies.
+- `NewtonsoftJsonSerializer` emits UTF-8 straight into the arena through an internal `TextWriter` adapter instead of building a string per shard. Output is byte-identical; it goes from the package's most allocation-hungry serializer to level with the buffer-native ones.
+- `UnityJsonSerializer` reserves the exact UTF-8 length instead of the three-bytes-per-UTF-16-char worst case, which used to overrun the pre-sized arena on the last shard of every save and force a payload-sized copy. `JsonUtility` still returns a `string`, so a UTF-16 copy per shard is inherent to that backend.
+- `CloudSaveStorage` uploads through Cloud Save's `SaveAsync(string, Stream)` over the buffer's own memory instead of `ToArray()`. Requires Cloud Save **3.0** or newer, which is when that overload appeared.
+- `SaveManager` keeps one blob-range array per slot and reuses it, instead of allocating one per save. Released on `DeleteAsync` and `Dispose`.
+
+### Added
+
+- **WebGL saves now persist.** Emscripten's filesystem is in RAM and Unity only mirrors it to IndexedDB on a quit event browsers do not reliably deliver, so closing a tab discarded anything unflushed. A bundled `.jslib` now syncs after every write and delete and populates before the first read, so a completed `WriteAsync` means durable rather than resident. Nothing to configure — `FileStorage` uses it automatically.
+  - **Pin the root to survive a redeploy.** `Application.persistentDataPath` is `/idbfs/<md5 of the page's directory URL>`, so every new URL — itch.io and most CI deploys, on each upload — yields a different directory and orphans existing saves. Pass `FileStorage` a fixed root under `/idbfs/` and the package mounts that path itself. A root that is neither `persistentDataPath` nor under `/idbfs/` is memory-only and warns once.
+- `PersistenceTask.RunOnThreadPool` runs inline on WebGL. The platform is single-threaded, so `Task.Run` / `UniTask.RunOnThreadPool` do not fail there — they queue work until the main thread next yields, completing storage calls an unpredictable number of frames late.
+- `EnvelopeCodec.ExactEncodedSize(in SaveEnvelope)` — the exact byte count `Write` appends, for callers laying data out immediately after the envelope. `MaxEncodedSize` remains the cheap ceiling for pre-sizing a growable buffer.
+- Contract test suites for the optional backends, behind `PERSISTENCE_HAS_MESSAGEPACK`, `PERSISTENCE_HAS_MEMORYPACK`, `PERSISTENCE_HAS_PROTOBUF`, `PERSISTENCE_HAS_SYSTEMTEXTJSON`, `PERSISTENCE_HAS_LZ4` and `PERSISTENCE_HAS_ZSTD`. `SerializerContractTests` and `StorageTransformContractTests` (plus `CompressionTransformContractTests`) state what the pipeline requires of any `ISerializer` / `IStorageTransform` — chiefly that both append to the writer rather than assume they own it, carry no state between calls, and survive payloads larger than one reservation. Every shipped and sample implementation now runs against them; the four sample bugs below are what they found.
+
+### Fixed
+
+- **`TransformLimits.ZstdMaxRatio` rejected saves zstd legitimately produces.** It was 1024, described as a ceiling real data would never approach; measured, an ordinary repeating pattern reaches 4519:1 and 32 MB of zeroes 32202:1. Because the bound is only checked on read, a compressible save was written successfully and then refused at load — data loss, not a guard. Now **32768**, the format's real maximum (a 4-byte RLE block describing a full 128 KiB block), derived like `DeflateMaxRatio` and `LZ4MaxRatio`. Decompression bombs are still rejected: the claim stays bounded by the bytes actually supplied.
+- **The Zstd sample leaked `ZstdSharp.ZstdException` out of `Reverse`** instead of `SaveCorruptedException`, so a caller catching the package's corruption signal could not handle a truncated or mis-sized frame.
+- **The System.Text.Json sample threw on every shard it serialized.** Its resolver modifier — which opts private `[SerializeField]` fields into the contract, mirroring Unity's rule — ran for every type the resolver touched. Types owned by a converter report `JsonTypeInfoKind.None` and have no property list, and `SerializableGuid` is one *and* carries two `[SerializeField]` ulongs, so the first id serialized threw `InvalidOperationException`. The modifier now skips anything that is not `JsonTypeInfoKind.Object`.
+- **The protobuf-net sample could not read back what it wrote.** `Deserialize` used the argument order of the `ReadOnlyMemory` overload against the type-first one, so the shard type arrived as the *value* and the type as `null`; protobuf-net inferred a contract for `System.RuntimeType` and threw on every load. It now uses the span overload, which also drops a `ToArray()` copy. `Serialize` no longer wraps its call in an unused `ProtoWriter.State`.
+- `TransformStorage`'s constructor releases the chain it was handed when it rejects it. It owns the transforms and the inner storage, but a throwing constructor never produces the object that would dispose them — and `new TransformStorage(inner, new XorTransform(key), null)` leaves the caller no reference to release.
+
+### Documentation
+
+- `docs/performance-assesment.md` — allocation and memory-traffic accounting per serializer, layout and storage combination, with theoretical minima, derived from the source rather than profiled.
+- README (both copies) gains a **Performance** section summarizing which pipeline configurations cost what.
+
 ## [0.5.0] - 2026-07-31
 
 ### Changed
@@ -187,6 +223,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Tests**: round-trips (0–1000 shards, both storage backends), incremental-save dirty accounting, envelope cache reuse/invalidation, background-serialization round-trip, blob migration with type rename, broken/cyclic chain detection, codec truncation fuzzing at every byte offset, whole-file bit-flip checksum sweep, `FileStorage` crash-recovery scenarios.
 - Dependencies: `com.cysharp.unitask` 2.3.3, `com.unity.collections` 2.1.4, `com.unity.burst` 1.8.0; Unity 2022.3+.
 
+[0.6.0]: https://github.com/Saesentsessis/Unity-Data-Shards/compare/0.5.0...0.6.0
 [0.5.0]: https://github.com/Saesentsessis/Unity-Data-Shards/compare/0.4.0...0.5.0
 [0.4.0]: https://github.com/Saesentsessis/Unity-Data-Shards/compare/0.3.1...0.4.0
 [0.3.1]: https://github.com/Saesentsessis/Unity-Data-Shards/compare/0.3.0...0.3.1

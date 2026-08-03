@@ -28,10 +28,10 @@ namespace Saesentsessis.Persistence.Serialization.SystemTextJson
 			Span<char> chars = stackalloc char[64];
 			var count = reader.CopyString(chars);
 
-			if (!SerializableGuid.TryParse(chars.Slice(0, count), out var guid))
-				throw new JsonException($"Cannot parse '{new string(chars.Slice(0, count))}' as a SerializableGuid.");
-
-			return guid;
+			if (SerializableGuid.TryParse(chars[..count], out var guid))
+				return guid;
+			
+			throw new JsonException($"Cannot parse '{new string(chars[..count])}' as a SerializableGuid.");
 		}
 	}
 }

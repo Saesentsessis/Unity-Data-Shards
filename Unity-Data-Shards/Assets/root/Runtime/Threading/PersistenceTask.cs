@@ -23,10 +23,23 @@ namespace Saesentsessis.Persistence.Threading
 		public static UniTask<T> FromResult<T>(T value) => UniTask.FromResult(value);
 
 		public static UniTask<TResult> RunOnThreadPool<TState, TResult>(Func<TState, TResult> func, TState state, CancellationToken cancellation = default)
-			=> UniTask.RunOnThreadPool(() => func(state), cancellationToken: cancellation);
+		{
+#if UNITY_WEBGL
+			return UniTask.FromResult(RunInline(func, state, cancellation));
+#else
+			return UniTask.RunOnThreadPool(() => func(state), cancellationToken: cancellation);
+#endif
+		}
 
 		public static UniTask RunOnThreadPool<TState>(Action<TState> action, TState state, CancellationToken cancellation = default)
-			=> UniTask.RunOnThreadPool(() => action(state), cancellationToken: cancellation);
+		{
+#if UNITY_WEBGL
+			RunInline(action, state, cancellation);
+			return UniTask.CompletedTask;
+#else
+			return UniTask.RunOnThreadPool(() => action(state), cancellationToken: cancellation);
+#endif
+		}
 
 		/// <summary>Joins previously scheduled work. Faulted entries surface on await.</summary>
 		public static UniTask WhenAll(UniTask[] tasks) => UniTask.WhenAll(tasks);
@@ -44,10 +57,23 @@ namespace Saesentsessis.Persistence.Threading
 		public static Task<T> FromResult<T>(T value) => Task.FromResult(value);
 
 		public static Task<TResult> RunOnThreadPool<TState, TResult>(Func<TState, TResult> func, TState state, CancellationToken cancellation = default)
-			=> Task.Run(() => func(state), cancellation);
+		{
+#if UNITY_WEBGL
+			return Task.FromResult(RunInline(func, state, cancellation));
+#else
+			return Task.Run(() => func(state), cancellation);
+#endif
+		}
 
 		public static Task RunOnThreadPool<TState>(Action<TState> action, TState state, CancellationToken cancellation = default)
-			=> Task.Run(() => action(state), cancellation);
+		{
+#if UNITY_WEBGL
+			RunInline(action, state, cancellation);
+			return Task.CompletedTask;
+#else
+			return Task.Run(() => action(state), cancellation);
+#endif
+		}
 
 		/// <summary>Joins previously scheduled work. Faulted entries surface on await.</summary>
 		public static Task WhenAll(Task[] tasks) => Task.WhenAll(tasks);
@@ -59,6 +85,33 @@ namespace Saesentsessis.Persistence.Threading
 		public static bool IsMainThread => PersistenceMainThreadDispatcher.IsMainThread;
 
 		public static System.Runtime.CompilerServices.YieldAwaitable Yield() => Task.Yield();
+#endif
+
+#if UNITY_WEBGL
+		/// <summary>
+		/// Runs the work on the calling thread, because on WebGL there is no other one.
+		/// </summary>
+		/// <remarks>
+		/// WebGL builds are single-threaded. `Task.Run` / `UniTask.RunOnThreadPool` do not fail
+		/// there — they queue work that only runs when the main thread next yields, which turns a
+		/// storage call into something that completes an unpredictable number of frames later, or
+		/// not at all if the caller is waiting on it. Running inline keeps the operation ordered
+		/// with respect to its caller. It does mean file I/O happens on the main thread, which on
+		/// WebGL is a memory copy rather than a disk seek — the filesystem is in RAM.
+		/// </remarks>
+		private static TResult RunInline<TState, TResult>(Func<TState, TResult> func, TState state, CancellationToken cancellation)
+		{
+			cancellation.ThrowIfCancellationRequested();
+
+			return func(state);
+		}
+
+		private static void RunInline<TState>(Action<TState> action, TState state, CancellationToken cancellation)
+		{
+			cancellation.ThrowIfCancellationRequested();
+
+			action(state);
+		}
 #endif
 	}
 }

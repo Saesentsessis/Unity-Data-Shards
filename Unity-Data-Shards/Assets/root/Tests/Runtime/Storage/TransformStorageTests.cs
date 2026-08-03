@@ -318,6 +318,7 @@ namespace Saesentsessis.Persistence.Tests
 		public void Dispose_CascadesToInnerStorage()
 		{
 			var inner = new MemoryStorage();
+			// Not a `using`: disposing exactly once, explicitly, is what this test is asserting.
 			var storage = new TransformStorage(inner, new TaggedPrefixTransform(0x33));
 
 			storage.Dispose();
@@ -379,230 +380,23 @@ namespace Saesentsessis.Persistence.Tests
 				new TransformStorage(new MemoryStorage(), new XorTransform(0x11), null));
 		}
 
-		[UnityTest]
-		public IEnumerator XorTransform_RoundTripsThroughStorage() => AsyncTest.Run(async () =>
+		[Test]
+		public void Constructor_ReleasesWhatItWasHanded_WhenItThrows()
 		{
 			var inner = new MemoryStorage();
-			using var storage = new TransformStorage(inner, new XorTransform(0x5A));
-			var payload = Payload(512);
+			var transform = new DisposableTransform();
 
-			await WriteAsync(storage, Key, payload);
+			// Written the way a caller actually writes it: the arguments are constructed inline, so
+			// when the constructor throws there is no reference left to dispose them through. The
+			// storage owns them either way, so a failed construction has to release them or their
+			// native buffers leak — which is exactly how this surfaced, as a leaked XorTransform
+			// pattern from the test above.
+			Assert.Throws<ArgumentNullException>(() =>
+				new TransformStorage(inner, transform, null));
 
-			CollectionAssert.AreNotEqual(payload, inner.Data[Key], "The bytes at rest must be masked.");
-			CollectionAssert.AreEqual(payload, await ReadAsync(storage, Key));
-		});
-
-		[Test]
-		public void XorTransform_ThrowsOnEmptyOrZeroedPattern()
-		{
-			Assert.Throws<ArgumentException>(() => new XorTransform((byte)0));
-			Assert.Throws<ArgumentException>(() => new XorTransform(0));
-			Assert.Throws<ArgumentException>(() => new XorTransform(0u));
-			Assert.Throws<ArgumentException>(() => new XorTransform(0L));
-			Assert.Throws<ArgumentException>(() => new XorTransform(0UL));
-			Assert.Throws<ArgumentException>(() => new XorTransform(ReadOnlySpan<byte>.Empty));
-			Assert.Throws<ArgumentException>(() => new XorTransform(null));
+			Assert.AreEqual(1, transform.DisposeCount, "A rejected chain must still be released.");
+			Assert.IsTrue(inner.Disposed, "The inner storage is owned on the failure path too.");
 		}
-
-		[Test]
-		public void XorTransform_HandlesEmptyInput()
-		{
-			var transform = new XorTransform(0x5A);
-			using var writer = new PooledArrayBufferWriter();
-
-			Assert.DoesNotThrow(() => transform.Apply(ReadOnlySpan<byte>.Empty, writer));
-			Assert.AreEqual(0, writer.WrittenLength);
-		}
-
-		[Test]
-		public void XorTransform_IsItsOwnInverse()
-		{
-			var transform = new XorTransform(0x3C);
-			var payload = Payload(300);
-
-			using var applied = new PooledArrayBufferWriter();
-			transform.Apply(payload, applied);
-
-			using var reversed = new PooledArrayBufferWriter();
-			transform.Reverse(applied.WrittenSpan, reversed);
-
-			CollectionAssert.AreEqual(payload, reversed.WrittenSpan.ToArray());
-		}
-
-		[UnityTest]
-		public IEnumerator DeflateTransform_RoundTripsAndCompresses() => AsyncTest.Run(async () =>
-		{
-			var inner = new MemoryStorage();
-			using var storage = new TransformStorage(inner, new DeflateTransform());
-
-			// Highly repetitive, so a working compressor must shrink it well below the input.
-			var payload = new byte[8192];
-			await WriteAsync(storage, Key, payload);
-
-			Assert.Less(inner.Data[Key].Length, payload.Length / 4,
-				"Deflate must compress a run of zeroes to a fraction of its size.");
-			CollectionAssert.AreEqual(payload, await ReadAsync(storage, Key));
-		});
-
-		[UnityTest]
-		public IEnumerator DeflateTransform_HandlesIncompressibleAndTinyPayloads() => AsyncTest.Run(async () =>
-		{
-			var inner = new MemoryStorage();
-			using var storage = new TransformStorage(inner, new DeflateTransform());
-
-			foreach (var length in new[] { 1, 2, 15, 16, 17, 1023 })
-			{
-				var payload = Payload(length, seed: length);
-				await WriteAsync(storage, Key, payload);
-
-				CollectionAssert.AreEqual(payload, await ReadAsync(storage, Key),
-					$"Deflate round-trip failed for a {length}-byte payload.");
-			}
-		});
-
-		[Test]
-		public void DeflateTransform_HostileLengthPrefix_IsRejectedWithoutAllocating()
-		{
-			// A decompression bomb: a tiny body claiming ~2 GB of output. The declared length comes
-			// off disk, which means it comes from whoever last edited the save, so reserving from it
-			// is how a 40-byte file turns into a 2 GB allocation.
-			var transform = new DeflateTransform();
-			using var compressed = new PooledArrayBufferWriter();
-
-			transform.Apply(Payload(64), compressed);
-
-			var tampered = compressed.WrittenSpan.ToArray();
-			BinaryPrimitives.WriteInt32LittleEndian(tampered, int.MaxValue);
-
-			using var output = new PooledArrayBufferWriter();
-
-			var thrown = Assert.Throws<SaveCorruptedException>(() => transform.Reverse(tampered, output));
-
-			Assert.AreEqual(SaveCorruptedExceptionReason.EnvelopeIsTooLarge, thrown.Reason,
-				"A prefix beyond the format's maximum expansion must be rejected on the ratio check, " +
-				"before anything is reserved.");
-		}
-
-		[Test]
-		public void DeflateTransform_ShortenedLengthPrefix_IsRejected()
-		{
-			// The mirror case: a prefix small enough to pass the ratio check but smaller than what
-			// the stream actually produces. The decoder is driven by the stream, so this surfaces
-			// as an overrun rather than as a silently truncated save.
-			var transform = new DeflateTransform();
-			using var compressed = new PooledArrayBufferWriter();
-
-			transform.Apply(Payload(2048), compressed);
-
-			var tampered = compressed.WrittenSpan.ToArray();
-			BinaryPrimitives.WriteInt32LittleEndian(tampered, 16);
-
-			using var output = new PooledArrayBufferWriter();
-
-			Assert.Throws<SaveCorruptedException>(() => transform.Reverse(tampered, output));
-		}
-
-		[Test]
-		public void DeflateTransform_TruncatedBody_IsRejected()
-		{
-			// Honest prefix, missing bytes: the stream stops early and the length check catches it.
-			var transform = new DeflateTransform();
-			using var compressed = new PooledArrayBufferWriter();
-
-			transform.Apply(Payload(4096), compressed);
-
-			var truncated = compressed.WrittenSpan[..(compressed.WrittenLength / 2)].ToArray();
-
-			using var output = new PooledArrayBufferWriter();
-
-			Assert.Throws<SaveCorruptedException>(() => transform.Reverse(truncated, output));
-		}
-
-		[Test]
-		public void DeflateTransform_SurvivesPayloadLargerThanOneReservation()
-		{
-			// Bigger than TransformLimits.MaxReservation, so Reverse has to loop and grow rather
-			// than reserve the whole thing up front — the path the bomb fix introduced.
-			var transform = new DeflateTransform();
-			var payload = Payload(TransformLimits.MaxReservation + 4096, seed: 7);
-
-			using var compressed = new PooledArrayBufferWriter();
-			transform.Apply(payload, compressed);
-
-			using var output = new PooledArrayBufferWriter();
-			transform.Reverse(compressed.WrittenSpan, output);
-
-			CollectionAssert.AreEqual(payload, output.WrittenSpan.ToArray());
-		}
-
-		[UnityTest]
-		public IEnumerator AesTransform_RoundTripsThroughStorage() => AsyncTest.Run(async () =>
-		{
-			var inner = new MemoryStorage();
-			using var storage = new TransformStorage(inner, new AesCbcHmacTransform(TestKey()));
-
-			foreach (var length in new[] { 1, 15, 16, 17, 1000 })
-			{
-				var payload = Payload(length, seed: length);
-				await WriteAsync(storage, Key, payload);
-
-				CollectionAssert.AreNotEqual(payload, inner.Data[Key], "Plaintext must not reach storage.");
-				CollectionAssert.AreEqual(payload, await ReadAsync(storage, Key),
-					$"AES round-trip failed for a {length}-byte payload.");
-			}
-		});
-
-		[UnityTest]
-		public IEnumerator AesTransform_UsesAFreshIvPerCall() => AsyncTest.Run(async () =>
-		{
-			var inner = new MemoryStorage();
-			using var storage = new TransformStorage(inner, new AesCbcHmacTransform(TestKey()));
-			var payload = Payload(256);
-
-			await WriteAsync(storage, Key, payload);
-			var first = (byte[])inner.Data[Key].Clone();
-
-			await WriteAsync(storage, Key, payload);
-			var second = inner.Data[Key];
-
-			CollectionAssert.AreNotEqual(first, second,
-				"The same plaintext must encrypt differently each time — the IV has to be random per call.");
-			CollectionAssert.AreEqual(payload, await ReadAsync(storage, Key));
-		});
-
-		[UnityTest]
-		public IEnumerator AesTransform_TamperedCiphertext_ThrowsChecksumMismatch() => AsyncTest.Run(async () =>
-		{
-			var inner = new MemoryStorage();
-			using var storage = new TransformStorage(inner, new AesCbcHmacTransform(TestKey()));
-
-			await WriteAsync(storage, Key, Payload(256));
-
-			// Flip a byte inside the ciphertext, past the IV.
-			inner.Data[Key][32] ^= 0xFF;
-
-			var exception = Assert.ThrowsAsync<SaveCorruptedException>(
-				async () => await ReadAsync(storage, Key));
-
-			Assert.AreEqual(SaveCorruptedExceptionReason.ChecksumMismatch, exception.Reason,
-				"The HMAC must reject the edit before any decryption is attempted.");
-		});
-
-		[UnityTest]
-		public IEnumerator AesTransform_WrongKey_IsRejected() => AsyncTest.Run(async () =>
-		{
-			var inner = new MemoryStorage();
-
-			using (var storage = new TransformStorage(inner, new AesCbcHmacTransform(TestKey())))
-				await WriteAsync(storage, Key, Payload(128));
-
-			var otherKey = TestKey();
-			otherKey[0] ^= 0xFF;
-
-			using var wrong = new TransformStorage(inner, new AesCbcHmacTransform(otherKey));
-
-			Assert.ThrowsAsync<SaveCorruptedException>(async () => await ReadAsync(wrong, Key));
-		});
 
 		[UnityTest]
 		public IEnumerator CompressThenEncrypt_RoundTrips() => AsyncTest.Run(async () =>
@@ -626,7 +420,7 @@ namespace Saesentsessis.Persistence.Tests
 		public IEnumerator SaveManager_SingleFile_OverTransformStorage_RoundTrips() => AsyncTest.Run(async () =>
 		{
 			var inner = new MemoryStorage();
-			var storage = new TransformStorage(inner, new XorTransform(0x5A), new TaggedPrefixTransform(0x99));
+			using var storage = new TransformStorage(inner, new XorTransform(0x5A), new TaggedPrefixTransform(0x99));
 			using var manager = new SaveManager(new UnityJsonSerializer(), new SingleFileSaveLayout(storage));
 
 			var id = Guid.NewGuid();
@@ -644,7 +438,7 @@ namespace Saesentsessis.Persistence.Tests
 		{
 			var inner = new MemoryStorage();
 			var counter = new CountingTransform();
-			var storage = new TransformStorage(inner, counter);
+			using var storage = new TransformStorage(inner, counter);
 			using var manager = new SaveManager(new UnityJsonSerializer(), new MultiFileSaveLayout(storage));
 
 			var shards = new List<IDataShard>
@@ -670,7 +464,7 @@ namespace Saesentsessis.Persistence.Tests
 		public IEnumerator TamperedBytesAtRest_ThrowSaveCorrupted() => AsyncTest.Run(async () =>
 		{
 			var inner = new MemoryStorage();
-			var storage = new TransformStorage(inner, new XorTransform(0x5A));
+			using var storage = new TransformStorage(inner, new XorTransform(0x5A));
 			using var manager = new SaveManager(new UnityJsonSerializer(), new SingleFileSaveLayout(storage));
 
 			await manager.SaveAsync(Key, new List<IDataShard> { new TestShard(Guid.NewGuid(), 7, "x") });

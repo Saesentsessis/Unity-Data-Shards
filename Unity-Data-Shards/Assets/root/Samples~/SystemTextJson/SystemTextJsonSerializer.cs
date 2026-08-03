@@ -20,6 +20,8 @@ namespace Saesentsessis.Persistence.Serialization.SystemTextJson
 	/// </remarks>
 	public sealed class SystemTextJsonSerializer : ISerializer
 	{
+		[ThreadStatic] private static Utf8JsonWriter _utf8Writer;
+		
 		private static JsonSerializerOptions CreateDefaultOptions()
 		{
 			return new JsonSerializerOptions
@@ -43,6 +45,15 @@ namespace Saesentsessis.Persistence.Serialization.SystemTextJson
 
 			void CreateSerializeFieldModifier(JsonTypeInfo info)
 			{
+				// Modifiers run for EVERY type the resolver touches, not just the shards — including
+				// every primitive and every type owned by a converter, such as SerializableGuid.
+				// Those report Kind None and have no property list at all, so reaching for
+				// info.Properties on one throws "Invalid JsonTypeInfo operation for JsonTypeInfoKind
+				// 'None'". SerializableGuid is exactly such a type *and* carries two [SerializeField]
+				// ulongs, so without this guard the modifier throws on the first shard serialized.
+				if (info.Kind != JsonTypeInfoKind.Object)
+					return;
+
 				foreach (var field in info.Type.GetFields(BindingFlags.Instance | BindingFlags.NonPublic))
 				{
 					if (field.IsDefined(typeof(UnityEngine.SerializeField), false) == false)
@@ -67,8 +78,9 @@ namespace Saesentsessis.Persistence.Serialization.SystemTextJson
 
 		public void Serialize(object value, Type type, IBufferWriter<byte> writer)
 		{
-			using var jsonWriter = new Utf8JsonWriter(writer);
-			JsonSerializer.Serialize(jsonWriter, value, type, _options);
+			_utf8Writer ??= new Utf8JsonWriter(writer);
+			_utf8Writer.Reset(writer);
+			JsonSerializer.Serialize(_utf8Writer, value, type, _options);
 		}
 
 		public object Deserialize(ReadOnlySpan<byte> data, Type type)

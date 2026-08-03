@@ -33,8 +33,21 @@ namespace Saesentsessis.Persistence.Storage.Transforms
 		/// <summary>LZ4's theoretical maximum expansion for a raw block.</summary>
 		public const int LZ4MaxRatio = 255;
 
-		/// <summary>Zstd's practical ceiling; the format allows more, real save data never approaches it.</summary>
-		public const int ZstdMaxRatio = 1024;
+		/// <summary>
+		/// Zstd's theoretical maximum expansion: a 4-byte RLE block describes a full 128 KiB block,
+		/// so 131072 / 4.
+		/// </summary>
+		/// <remarks>
+		/// This was 1024, described as a "practical ceiling" that real save data would never
+		/// approach. It is not one. Measured against ZstdSharp 0.8.8, 32 MB of zeroes compresses
+		/// 32202:1 and an ordinary repeating byte pattern reaches 4519:1 — both far past 1024:1. The
+		/// consequence was worse than a rejected read: the bound is only checked on the way back in,
+		/// so a highly compressible save was written successfully and then refused at load, which is
+		/// data loss rather than a guard. Like <see cref="DeflateMaxRatio"/> and
+		/// <see cref="LZ4MaxRatio"/>, this must be the format's real maximum, never a guess at what
+		/// data "should" look like.
+		/// </remarks>
+		public const int ZstdMaxRatio = 32768;
 
 		/// <summary>
 		/// Rejects a declared output length that no honest payload of this size could produce.

@@ -112,6 +112,11 @@ namespace Saesentsessis.Persistence.Storage
 
 		public async StorageReadTask TryReadAsync(string key, Allocator allocator, CancellationToken cancellation = default)
 		{
+#if UNITY_WEBGL && !UNITY_EDITOR
+			// A fresh page starts with an empty in-memory filesystem: without pulling IndexedDB in
+			// first, every previously saved slot reads as "not found".
+			await Storage.WebGL.WebGLFileSystem.EnsureMountedAsync(_rootDirectory);
+#endif
 			var path = ResolvePath(key);
 
 			// Held across the whole read, not just the .bak restore. The write dance renames the
@@ -168,6 +173,12 @@ namespace Saesentsessis.Persistence.Storage
 
 		public unsafe TaskType WriteAsync(string key, NativeArray<byte> data, CancellationToken cancellation = default)
 		{
+#if UNITY_WEBGL && !UNITY_EDITOR
+			// WebGL writes reach a filesystem that lives in RAM; only an explicit IDBFS sync makes
+			// them survive the tab. Completing before that sync would report a save as durable when
+			// it is one page reload away from being gone.
+			return WriteWebGLAsync(key, data, cancellation);
+#else
 			var path = ResolvePath(key);
 
 			// Zero-copy by contract: the caller guarantees `data` stays valid until this
@@ -192,7 +203,38 @@ namespace Saesentsessis.Persistence.Storage
 					StorageGate.Exit(p);
 				}
 			}, state, cancellation);
+#endif
 		}
+
+#if UNITY_WEBGL && !UNITY_EDITOR
+		private async TaskType WriteWebGLAsync(string key, NativeArray<byte> data, CancellationToken cancellation)
+		{
+			await Storage.WebGL.WebGLFileSystem.EnsureMountedAsync(_rootDirectory);
+
+			cancellation.ThrowIfCancellationRequested();
+
+			var path = ResolvePath(key);
+
+			// Single-threaded platform: the gate is uncontended, and the write is a memcpy into
+			// MEMFS rather than a disk seek.
+			StorageGate.Enter(path);
+
+			try
+			{
+				WriteInPlace(path, data);
+			}
+			finally
+			{
+				StorageGate.Exit(path);
+			}
+
+			await Storage.WebGL.WebGLFileSystem.FlushAsync();
+		}
+
+		/// <summary>Pointer extraction split out: a raw pointer cannot live across an await.</summary>
+		private static unsafe void WriteInPlace(string path, NativeArray<byte> data)
+			=> WriteSync(path, (IntPtr)data.GetUnsafeReadOnlyPtr(), data.Length);
+#endif
 
 		public BoolTask ExistsAsync(string key, CancellationToken cancellation = default)
 		{
@@ -207,6 +249,11 @@ namespace Saesentsessis.Persistence.Storage
 
 		public TaskType DeleteAsync(string key, CancellationToken cancellation = default)
 		{
+#if UNITY_WEBGL && !UNITY_EDITOR
+			// A delete that is not synced comes back on the next reload, which is worse than a
+			// delete that fails: the player sees a slot they removed reappear.
+			return DeleteWebGLAsync(key, cancellation);
+#else
 			var path = ResolvePath(key);
 
 			// Takes the same lock as the write: deleting a slot while its tmp/bak dance is mid-flight
@@ -237,7 +284,34 @@ namespace Saesentsessis.Persistence.Storage
 				path,
 				cancellation
 			);
+#endif
 		}
+
+#if UNITY_WEBGL && !UNITY_EDITOR
+		private async TaskType DeleteWebGLAsync(string key, CancellationToken cancellation)
+		{
+			await Storage.WebGL.WebGLFileSystem.EnsureMountedAsync(_rootDirectory);
+
+			cancellation.ThrowIfCancellationRequested();
+
+			var path = ResolvePath(key);
+
+			StorageGate.Enter(path);
+
+			try
+			{
+				File.Delete(path);
+				File.Delete(path + BackupSuffix);
+				File.Delete(path + ".tmp");
+			}
+			finally
+			{
+				StorageGate.Exit(path);
+			}
+
+			await Storage.WebGL.WebGLFileSystem.FlushAsync();
+		}
+#endif
 
 		private static async ReadStatusTask AwaitCompletion(ReadHandle handle)
 		{

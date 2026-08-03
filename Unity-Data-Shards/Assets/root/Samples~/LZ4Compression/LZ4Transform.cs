@@ -5,7 +5,7 @@ using K4os.Compression.LZ4;
 using Saesentsessis.Persistence.Core;
 using Saesentsessis.Persistence.Storage.Transforms;
 
-namespace Saesentsessis.Persistence.Storage.LZ4
+namespace Saesentsessis.Persistence.Storage.Transforms.LZ4
 {
 	/// <summary>
 	/// LZ4 compression backed by K4os.Compression.LZ4 — pure managed C#, so it carries none of the

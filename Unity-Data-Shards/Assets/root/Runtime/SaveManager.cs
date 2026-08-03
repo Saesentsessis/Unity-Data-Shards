@@ -398,11 +398,24 @@ namespace Saesentsessis.Persistence
 
 		// Span locals are forbidden in async methods, so the hot loops live in these
 		// sync helpers and the async pipelines call them between thread switches.
+		/// <summary>
+		/// Serializes the captured shards into the arena, leaving the layout's reservations empty.
+		/// </summary>
+		/// <remarks>
+		/// The gaps are advanced over rather than written, so the shard lands at its final address
+		/// and the layout fills the space in front of it afterwards. Recorded offsets stay
+		/// <b>absolute</b> within the arena, which is what lets a layout reach a blob's prefix by
+		/// subtracting from its offset; a layout that writes offsets into a file where they are
+		/// payload-relative subtracts the header itself.
+		/// </remarks>
 		private static void SerializeBlobs(ISerializer serializer, IReadOnlyList<IDataShard> shards,
-			NativeBitArray snapshot, IArenaWriter arena, Span<ShardBlobRange> ranges, CancellationToken cancellation)
+			NativeBitArray snapshot, IArenaWriter arena, Span<ShardBlobRange> ranges,
+			int header, int blobPrefix, CancellationToken cancellation)
 		{
 			var index = 0;
 			var count = shards.Count;
+
+			Reserve(arena, header);
 
 			for (var i = 0; i < count; i++)
 			{
@@ -411,11 +424,23 @@ namespace Saesentsessis.Persistence
 
 				cancellation.ThrowIfCancellationRequested();
 
+				Reserve(arena, blobPrefix);
+
 				var shard = shards[i];
 				var before = arena.WrittenLength;
 				serializer.Serialize(shard, shard.GetType(), arena);
 				ranges[index++] = new ShardBlobRange(shard.Identifier, before, arena.WrittenLength - before);
 			}
+		}
+
+		/// <summary>Advances the arena over <paramref name="bytes"/> without writing them.</summary>
+		private static void Reserve(IArenaWriter arena, int bytes)
+		{
+			if (bytes <= 0)
+				return;
+
+			arena.GetSpan(bytes);
+			arena.Advance(bytes);
 		}
 
 		/// <summary>
@@ -537,6 +562,10 @@ namespace Saesentsessis.Persistence
 			// touched after SwitchToMainThread.
 			private readonly Dictionary<string, int> _arenaSizeHints = new();
 
+			// Per-slot range arrays, reused across saves. Unmanaged, so every exit path — Dispose,
+			// DeleteAsync, growth — has to release the old one.
+			private readonly Dictionary<string, NativeArray<ShardBlobRange>> _rangeBuffers = new();
+
 			// Resolved once: the cast is a type test per save otherwise, and the answer cannot change.
 			private readonly IIncrementalSaveLayout _incremental;
 
@@ -557,18 +586,26 @@ namespace Saesentsessis.Persistence
 				NativeBitArray snapshot, int blobCount, CancellationToken cancellation)
 			{
 				var background = _serializer.SupportsBackgroundSerialization;
-				var capacity = ArenaCapacity(slot, blobCount);
 
-				// A1: one arena + one blittable range array per save, regardless of shard count.
+				// Space the layout wants in front of the data, asked for before anything is
+				// serialized so the shards can be written into their final position. This is what
+				// removes the payload copy both layouts used to pay.
+				var header = _layout.HeaderReservation(envelope, blobCount);
+				var blobPrefix = _layout.BlobReservation;
+				var reserved = header + blobCount * blobPrefix;
+
+				var capacity = Math.Max(ArenaCapacity(slot, blobCount), reserved + 1);
+
+				// One arena per save. The range array is kept per slot and reused.
 				var arena = new NativeListBufferWriter(capacity, Allocator.Persistent);
-				var ranges = new NativeArray<ShardBlobRange>(blobCount, Allocator.Persistent);
+				var ranges = RentRanges(slot, blobCount);
 
 				try
 				{
 					if (background)
 						await PersistenceTask.SwitchToThreadPool();
 
-					Serialize(_serializer, shards, snapshot, arena, ranges, cancellation);
+					Serialize(_serializer, shards, snapshot, arena, ranges, header, blobPrefix, cancellation);
 
 					// Layouts/storages may touch Unity APIs — hand off from the main thread.
 					if (background)
@@ -586,9 +623,39 @@ namespace Saesentsessis.Persistence
 					if (background && !PersistenceTask.IsMainThread)
 						await PersistenceTask.SwitchToMainThread();
 
+					// `ranges` is owned by _rangeBuffers, not by this save.
 					arena.Dispose();
-					ranges.Dispose();
 				}
+			}
+
+			/// <summary>
+			/// A range array for this slot, sized to <paramref name="blobCount"/>.
+			/// </summary>
+			/// <remarks>
+			/// Kept per slot and grown on demand rather than allocated per save. The returned value
+			/// is a <c>GetSubArray</c> view trimmed to the exact count, because layouts read
+			/// <c>ranges.Length</c> as the blob count — handing back the whole capacity would make a
+			/// shrinking save write stale ranges. Released in <see cref="Dispose"/> and whenever the
+			/// slot is deleted.
+			/// </remarks>
+			private NativeArray<ShardBlobRange> RentRanges(string slot, int blobCount)
+			{
+				if (_rangeBuffers.TryGetValue(slot, out var buffer) && buffer.Length >= blobCount)
+					return buffer.GetSubArray(0, blobCount);
+
+				if (buffer.IsCreated)
+					buffer.Dispose();
+
+				buffer = new NativeArray<ShardBlobRange>(Math.Max(blobCount, 4), Allocator.Persistent);
+				_rangeBuffers[slot] = buffer;
+
+				return buffer.GetSubArray(0, blobCount);
+			}
+
+			private void ReleaseRanges(string slot)
+			{
+				if (_rangeBuffers.Remove(slot, out var buffer) && buffer.IsCreated)
+					buffer.Dispose();
 			}
 
 			public async ShardArrayTask LoadAsync(string slot, MigrationRegistry migrations, CancellationToken cancellation)
@@ -629,6 +696,8 @@ namespace Saesentsessis.Persistence
 			public TaskType DeleteAsync(string slot, CancellationToken cancellation)
 			{
 				_arenaSizeHints.Remove(slot);
+				ReleaseRanges(slot);
+
 				return _layout.DeleteAsync(slot, cancellation);
 			}
 
@@ -641,9 +710,10 @@ namespace Saesentsessis.Persistence
 			}
 
 			private static void Serialize(ISerializer serializer, IReadOnlyList<IDataShard> shards,
-				NativeBitArray snapshot, NativeListBufferWriter arena, NativeArray<ShardBlobRange> ranges, CancellationToken cancellation)
+				NativeBitArray snapshot, NativeListBufferWriter arena, NativeArray<ShardBlobRange> ranges,
+				int header, int blobPrefix, CancellationToken cancellation)
 			{
-				SerializeBlobs(serializer, shards, snapshot, arena, ranges.AsSpan(), cancellation);
+				SerializeBlobs(serializer, shards, snapshot, arena, ranges.AsSpan(), header, blobPrefix, cancellation);
 			}
 
 			private static IDataShard[] Deserialize(ISerializer serializer, MigrationRegistry migrations,
@@ -657,6 +727,13 @@ namespace Saesentsessis.Persistence
 			public void Dispose()
 			{
 				_arenaSizeHints.Clear();
+
+				// Unmanaged and reused across saves, so nothing else will collect them.
+				foreach (var buffer in _rangeBuffers.Values)
+					if (buffer.IsCreated)
+						buffer.Dispose();
+
+				_rangeBuffers.Clear();
 				_layout.Dispose();
 			}
 		}
@@ -768,7 +845,10 @@ namespace Saesentsessis.Persistence
 			private static void Serialize(ISerializer serializer, IReadOnlyList<IDataShard> shards,
 				NativeBitArray snapshot, PooledArrayBufferWriter arena, ShardBlobRange[] ranges, int blobCount, CancellationToken cancellation)
 			{
-				SerializeBlobs(serializer, shards, snapshot, arena, ranges.AsSpan(0, blobCount), cancellation);
+				// IManagedSaveLayout has no reservation contract yet — no shipped implementation to
+				// need one — so the managed path serializes with no gaps.
+				SerializeBlobs(serializer, shards, snapshot, arena, ranges.AsSpan(0, blobCount),
+					header: 0, blobPrefix: 0, cancellation);
 			}
 
 			private static IDataShard[] Deserialize(ISerializer serializer, MigrationRegistry migrations,

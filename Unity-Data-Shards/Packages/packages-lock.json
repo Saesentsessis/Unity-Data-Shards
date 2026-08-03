@@ -8,7 +8,7 @@
       "hash": "acc1c7bc9ea34c33b830e40316fca52553878d29"
     },
     "com.unity.burst": {
-      "version": "1.8.29",
+      "version": "1.8.30",
       "depth": 0,
       "source": "registry",
       "dependencies": {
@@ -18,7 +18,7 @@
       "url": "https://packages.unity.com"
     },
     "com.unity.collections": {
-      "version": "2.6.7",
+      "version": "2.6.8",
       "depth": 0,
       "source": "registry",
       "dependencies": {

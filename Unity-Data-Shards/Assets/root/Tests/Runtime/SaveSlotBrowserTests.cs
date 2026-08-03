@@ -219,7 +219,7 @@ namespace Saesentsessis.Persistence.Tests
 		{
 			var storage = new MemoryStorage();
 			var layout = new SingleFileSaveLayout(storage);
-			var manager = new SaveManager(new UnityJsonSerializer(), layout);
+			using var manager = new SaveManager(new UnityJsonSerializer(), layout);
 			var store = new ShardStore();
 
 			store.Add(new TestShard(Guid.NewGuid(), 1, "a"));
@@ -244,7 +244,7 @@ namespace Saesentsessis.Persistence.Tests
 			// layout puts the envelope at offset 0.
 			var storage = new MemoryStorage();
 			var layout = new MultiFileSaveLayout(storage);
-			var manager = new SaveManager(new UnityJsonSerializer(), layout);
+			using var manager = new SaveManager(new UnityJsonSerializer(), layout);
 			var store = new ShardStore();
 
 			store.Add(new TestShard(Guid.NewGuid(), 7, "multi"));
@@ -271,7 +271,7 @@ namespace Saesentsessis.Persistence.Tests
 		{
 			var storage = new MemoryStorage();
 			var layout = new SingleFileSaveLayout(storage);
-			var manager = new SaveManager(new UnityJsonSerializer(), layout);
+			using var manager = new SaveManager(new UnityJsonSerializer(), layout);
 			var store = new ShardStore();
 
 			store.Add(new TestShard(Guid.NewGuid(), 1, "a"));
@@ -295,7 +295,7 @@ namespace Saesentsessis.Persistence.Tests
 			// would take the exception. The header must stay readable and the date read as absent.
 			var storage = new MemoryStorage();
 			var layout = new SingleFileSaveLayout(storage);
-			var manager = new SaveManager(new UnityJsonSerializer(), layout);
+			using var manager = new SaveManager(new UnityJsonSerializer(), layout);
 			var store = new ShardStore();
 
 			store.Add(new TestShard(Guid.NewGuid(), 1, "a"));

@@ -10,7 +10,7 @@ Install MemoryPack for Unity (it is not bundled). Add both the runtime and its *
 via git UPM URL (see the [MemoryPack README](https://github.com/Cysharp/MemoryPack#unity)):
 
 ```
-https://github.com/Cysharp/MemoryPack.git?path=src/MemoryPack.Unity/Assets/Plugins/MemoryPack.Unity
+https://github.com/Cysharp/MemoryPack.git?path=src/MemoryPack.Unity/Assets/MemoryPack.Unity
 ```
 
 Ensure `MemoryPack.Core.dll` is **Auto Referenced** and the Roslyn source generator is active.

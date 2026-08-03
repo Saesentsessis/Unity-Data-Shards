@@ -21,7 +21,7 @@ namespace Saesentsessis.Persistence.Tests
 		private static async SampleTask SaveSample()
 		{
 			var storage = new MemoryStorage();
-			var manager = new SaveManager(new UnityJsonSerializer(), new SingleFileSaveLayout(storage));
+			using var manager = new SaveManager(new UnityJsonSerializer(), new SingleFileSaveLayout(storage));
 			var shards = new List<IDataShard>
 			{
 				new TestShard(Guid.NewGuid(), 1, "one"),
