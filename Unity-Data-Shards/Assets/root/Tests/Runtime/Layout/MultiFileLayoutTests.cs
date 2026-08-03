@@ -37,7 +37,7 @@ namespace Saesentsessis.Persistence.Tests
 		[UnityTest]
 		public IEnumerator RoundTrip_PreservesShardData([Values(0, 1, 10, 80, 1000)] int count) => AsyncTest.Run(async () =>
 		{
-			var manager = CreateManager(out var storage);
+			using var manager = CreateManager(out var storage);
 			var store = CreateShards(count);
 
 			await manager.SaveAsync(Slot, store);
@@ -59,7 +59,7 @@ namespace Saesentsessis.Persistence.Tests
 		[UnityTest]
 		public IEnumerator IncrementalSave_RewritesOnlyDirtyFilesAndEnvelope() => AsyncTest.Run(async () =>
 		{
-			var manager = CreateManager(out var storage);
+			using var manager = CreateManager(out var storage);
 			var store = CreateShards(10);
 
 			await manager.SaveAsync(Slot, store);
@@ -78,7 +78,7 @@ namespace Saesentsessis.Persistence.Tests
 		[UnityTest]
 		public IEnumerator CorruptedShardFile_ThrowsCorrupted() => AsyncTest.Run(async () =>
 		{
-			var manager = CreateManager(out var storage);
+			using var manager = CreateManager(out var storage);
 			await manager.SaveAsync(Slot, CreateShards(3));
 
 			// Flip one payload byte in the first shard file (past its 8-byte hash prefix).
@@ -95,7 +95,7 @@ namespace Saesentsessis.Persistence.Tests
 		[UnityTest]
 		public IEnumerator MissingShardFile_ThrowsCorrupted() => AsyncTest.Run(async () =>
 		{
-			var manager = CreateManager(out var storage);
+			using var manager = CreateManager(out var storage);
 			await manager.SaveAsync(Slot, CreateShards(3));
 
 			var shardKey = storage.Data.Keys.First(k => k != Slot);
@@ -111,7 +111,7 @@ namespace Saesentsessis.Persistence.Tests
 		[UnityTest]
 		public IEnumerator RemovingAShard_DeletesTheFileItOrphaned() => AsyncTest.Run(async () =>
 		{
-			var manager = CreateManager(out var storage);
+			using var manager = CreateManager(out var storage);
 			var store = CreateShards(5);
 
 			await manager.SaveAsync(Slot, store);
@@ -141,7 +141,7 @@ namespace Saesentsessis.Persistence.Tests
 		{
 			// Membership changed without the count changing, so the cheap length gate cannot settle
 			// it — this is the case an "only when it shrinks" check would miss.
-			var manager = CreateManager(out var storage);
+			using var manager = CreateManager(out var storage);
 			var store = CreateShards(3);
 
 			await manager.SaveAsync(Slot, store);
@@ -165,10 +165,10 @@ namespace Saesentsessis.Persistence.Tests
 		{
 			// The realistic sequence: a fresh manager that never wrote this slot learns the on-disk
 			// membership from the load, so the following save can still diff against it.
-			var first = CreateManager(out var storage);
+			using var first = CreateManager(out var storage);
 			await first.SaveAsync(Slot, CreateShards(4));
 
-			var second = new SaveManager(new UnityJsonSerializer(), new MultiFileSaveLayout(storage));
+			using var second = new SaveManager(new UnityJsonSerializer(), new MultiFileSaveLayout(storage));
 			var loaded = (await second.LoadAsync(Slot)).AsShardStore();
 
 			loaded.Remove(loaded[0].Identifier);
@@ -185,7 +185,7 @@ namespace Saesentsessis.Persistence.Tests
 		[UnityTest]
 		public IEnumerator UnchangedMembership_DeletesNothing() => AsyncTest.Run(async () =>
 		{
-			var manager = CreateManager(out var storage);
+			using var manager = CreateManager(out var storage);
 			var store = CreateShards(4);
 
 			await manager.SaveAsync(Slot, store);
@@ -202,7 +202,7 @@ namespace Saesentsessis.Persistence.Tests
 			// The orphan sweep cuts both ways: the save that dropped the shard deleted its file, and
 			// nothing about the shard object records that. Dirtiness alone would leave the next
 			// envelope pointing at a file that no longer exists.
-			var manager = CreateManager(out var storage);
+			using var manager = CreateManager(out var storage);
 			var store = CreateShards(3);
 
 			await manager.SaveAsync(Slot, store);
@@ -232,7 +232,7 @@ namespace Saesentsessis.Persistence.Tests
 		{
 			// Loading clears every dirty flag, so "save this loaded game under another name" would
 			// otherwise commit an envelope with no shard files at all behind it.
-			var manager = CreateManager(out var storage);
+			using var manager = CreateManager(out var storage);
 			await manager.SaveAsync(Slot, CreateShards(3));
 
 			var loaded = (await manager.LoadAsync(Slot)).AsShardStore();
@@ -254,7 +254,7 @@ namespace Saesentsessis.Persistence.Tests
 			// A layout that has neither read nor written the slot knows nothing about it and says so,
 			// rather than assuming the files are still there. The first save through it is therefore
 			// a full write; only once membership is established does incrementality resume.
-			var first = CreateManager(out var storage);
+			using var first = CreateManager(out var storage);
 			var store = CreateShards(4);
 
 			await first.SaveAsync(Slot, store);
@@ -263,7 +263,7 @@ namespace Saesentsessis.Persistence.Tests
 			foreach (var shard in store)
 				Assert.IsFalse(shard.IsDirty, "A successful save must leave its shards clean.");
 
-			var second = new SaveManager(new UnityJsonSerializer(), new MultiFileSaveLayout(storage));
+			using var second = new SaveManager(new UnityJsonSerializer(), new MultiFileSaveLayout(storage));
 			await second.SaveAsync(Slot, store);
 
 			Assert.AreEqual(10, storage.WriteCounts.Values.Sum(),
@@ -280,7 +280,7 @@ namespace Saesentsessis.Persistence.Tests
 		[UnityTest]
 		public IEnumerator Delete_RemovesEnvelopeAndAllShardFiles() => AsyncTest.Run(async () =>
 		{
-			var manager = CreateManager(out var storage);
+			using var manager = CreateManager(out var storage);
 			await manager.SaveAsync(Slot, CreateShards(5));
 			Assert.AreEqual(6, storage.Data.Count);
 

@@ -45,9 +45,50 @@ namespace Saesentsessis.Persistence.Core
 		bool RequiresFullSnapshot { get; }
 
 		/// <summary>
+		/// Bytes to leave free at the head of the payload arena, before the first blob.
+		/// </summary>
+		/// <remarks>
+		/// <para>
+		/// A layout that must put bytes <i>in front of</i> the shard data — an envelope, a file
+		/// header — would otherwise have to copy the whole payload into a buffer of its own. Asking
+		/// for the room up front instead lets the shards be serialized into their final position,
+		/// and the arena handed to <see cref="WriteAsync"/> becomes the file itself.
+        /// </para>
+		/// <para>
+		/// The reservation must be <b>exact</b>: whatever is written into it has to fill it
+		/// completely, because the payload begins at the very next byte and no format here can
+		/// express a gap. Size it with <c>EnvelopeCodec.ExactEncodedSize</c>, never with the bound.
+		/// The region arrives uninitialised.
+		/// </para>
+		/// <para>
+		/// Blob offsets in <c>ranges</c> are absolute within the arena, so they already include this
+		/// reservation. A layout writing them into a file where offsets are payload-relative must
+		/// subtract it.
+		/// </para>
+		/// </remarks>
+		int HeaderReservation(in SaveEnvelope envelope, int blobCount) => 0;
+
+		/// <summary>
+		/// Bytes to leave free immediately before <b>every</b> blob.
+		/// </summary>
+		/// <remarks>
+		/// The per-shard counterpart of <see cref="HeaderReservation"/>, for layouts that frame each
+		/// blob individually. <c>MultiFileSaveLayout</c> reserves eight bytes for its per-file
+		/// checksum, writes the hash into the gap, and hands storage a <c>GetSubArray</c> view
+		/// spanning gap and blob together — no scratch buffer and no copy. Must be filled
+		/// completely; the bytes arrive uninitialised.
+		/// </remarks>
+		int BlobReservation => 0;
+
+		/// <summary>
 		/// Writes the envelope and shard payload to storage. Does not take ownership
 		/// of the buffers; they stay valid until the returned task completes.
 		/// </summary>
+		/// <remarks>
+		/// <paramref name="payload"/> includes any space requested through
+		/// <see cref="HeaderReservation"/> and <see cref="BlobReservation"/>, and filling that space
+		/// is this method's job.
+		/// </remarks>
 		TaskType WriteAsync(string slot, SaveEnvelope envelope, NativeArray<byte> payload,
 			NativeArray<ShardBlobRange> ranges, CancellationToken cancellation = default);
 

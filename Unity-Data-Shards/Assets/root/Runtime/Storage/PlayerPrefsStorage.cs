@@ -12,13 +12,14 @@ using Saesentsessis.Persistence.Utils;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using UnityEngine;
-using IntTask = System.Threading.Tasks.Task<int>;
 #if PERSISTENCE_HAS_UNITASK
 using TaskType = Cysharp.Threading.Tasks.UniTask;
+using IntTask = Cysharp.Threading.Tasks.UniTask<int>;
 using BoolTask = Cysharp.Threading.Tasks.UniTask<bool>;
 using StorageReadTask = Cysharp.Threading.Tasks.UniTask<Saesentsessis.Persistence.Core.StorageReadResult>;
 #else
 using TaskType = System.Threading.Tasks.Task;
+using IntTask = System.Threading.Tasks.Task<int>;
 using BoolTask = System.Threading.Tasks.Task<bool>;
 using StorageReadTask = System.Threading.Tasks.Task<Saesentsessis.Persistence.Core.StorageReadResult>;
 #endif

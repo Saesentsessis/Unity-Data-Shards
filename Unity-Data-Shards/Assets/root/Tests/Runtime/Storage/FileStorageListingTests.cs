@@ -240,9 +240,9 @@ namespace Saesentsessis.Persistence.Tests
 				key[i] = (byte)(i + 1);
 
 			using var aes = new AesCbcHmacTransform(key);
-			var storage = new TransformStorage(_storage, new DeflateTransform(), aes);
+			using var storage = new TransformStorage(_storage, new DeflateTransform(), aes);
 			var layout = new SingleFileSaveLayout(storage);
-			var manager = new SaveManager(new UnityJsonSerializer(), layout);
+			using var manager = new SaveManager(new UnityJsonSerializer(), layout);
 			var store = new ShardStore();
 
 			store.Add(new TestShard(Guid.NewGuid(), 42, "encrypted"));

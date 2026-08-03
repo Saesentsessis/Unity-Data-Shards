@@ -239,7 +239,7 @@ namespace Saesentsessis.Persistence.Tests
 		[UnityTest]
 		public IEnumerator EndToEnd_SaveManagerOverFileStorage() => AsyncTest.Run(async () =>
 		{
-			var manager = new SaveManager(new UnityJsonSerializer(), new SingleFileSaveLayout(_storage));
+			using var manager = new SaveManager(new UnityJsonSerializer(), new SingleFileSaveLayout(_storage));
 			var store = new ShardStore();
 			store.Add(new TestShard(Guid.NewGuid(), 123, "file"));
 

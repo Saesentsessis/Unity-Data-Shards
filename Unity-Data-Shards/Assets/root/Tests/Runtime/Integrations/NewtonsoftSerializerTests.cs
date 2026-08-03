@@ -18,7 +18,7 @@ namespace Saesentsessis.Persistence.Tests
 		public IEnumerator RoundTrip_PreservesShardData() => AsyncTest.Run(async () =>
 		{
 			var storage = new MemoryStorage();
-			var manager = new SaveManager(new NewtonsoftJsonSerializer(), new SingleFileSaveLayout(storage));
+			using var manager = new SaveManager(new NewtonsoftJsonSerializer(), new SingleFileSaveLayout(storage));
 
 			var store = new ShardStore();
 			var id = Guid.NewGuid();
@@ -45,6 +45,52 @@ namespace Saesentsessis.Persistence.Tests
 
 			// The 32-char hex form must appear verbatim in the JSON.
 			StringAssert.Contains(((SerializableGuid)id).ToString(), json);
+		}
+
+		[Test]
+		public void EmitsUtf8DirectlyIncludingSurrogatePairs()
+		{
+			// This serializer now encodes straight into the arena through a stateful Encoder rather
+			// than building a string. Newtonsoft writes a surrogate pair as two separate chars, so a
+			// stateless encode would turn each half into U+FFFD — text that survives a round trip is
+			// the only proof the encoder state is carried across Write calls.
+			const string text = "emoji 🚀 accents äöü 日本語";
+
+			var serializer = new NewtonsoftJsonSerializer();
+			var shard = new TestShard(Guid.NewGuid(), 7, text);
+
+			using var writer = new Saesentsessis.Persistence.Buffers.PooledArrayBufferWriter();
+			serializer.Serialize(shard, shard.GetType(), writer);
+
+			var json = Encoding.UTF8.GetString(writer.WrittenSpan);
+
+			StringAssert.Contains("🚀", json, "The surrogate pair was split or replaced.");
+			StringAssert.Contains("äöü", json);
+			StringAssert.Contains("日本語", json);
+
+			var restored = (TestShard)serializer.Deserialize(writer.WrittenSpan, typeof(TestShard));
+			Assert.AreEqual(text, restored.text);
+		}
+
+		[Test]
+		public void RepeatedSerializeReusesTheWriterWithoutLeakingState()
+		{
+			// The adapter is [ThreadStatic] and reused, so a leftover pending surrogate or a stale
+			// destination from the previous call would corrupt the next shard rather than this one.
+			var serializer = new NewtonsoftJsonSerializer();
+
+			for (var i = 0; i < 5; i++)
+			{
+				var shard = new TestShard(Guid.NewGuid(), i, i % 2 == 0 ? "🚀" : "plain");
+
+				using var writer = new Saesentsessis.Persistence.Buffers.PooledArrayBufferWriter();
+				serializer.Serialize(shard, shard.GetType(), writer);
+
+				var restored = (TestShard)serializer.Deserialize(writer.WrittenSpan, typeof(TestShard));
+
+				Assert.AreEqual(shard.value, restored.value);
+				Assert.AreEqual(shard.text, restored.text, $"Iteration {i} carried state from the previous one.");
+			}
 		}
 	}
 }

@@ -13,6 +13,7 @@ using SaveLayoutTask = System.Threading.Tasks.Task<Saesentsessis.Persistence.Lay
 using Saesentsessis.Persistence.Buffers;
 using Saesentsessis.Persistence.Core;
 using Unity.Collections;
+using Unity.Collections.LowLevel.Unsafe;
 
 namespace Saesentsessis.Persistence.Layout
 {
@@ -24,14 +25,13 @@ namespace Saesentsessis.Persistence.Layout
 	/// the storage write and verified before anything is parsed on read.
 	/// </summary>
 	/// <remarks>
-	/// <b>Cost:</b> the payload is copied once, into a second arena as large as itself. That is
-	/// structural, not an oversight — the envelope has to precede the payload in the file, its size
-	/// is not known until serialization has finished, and <see cref="IStorage.WriteAsync"/> takes
-	/// one contiguous array. Peak unmanaged memory during a save is therefore about twice the
-	/// payload. It buys the property the layout exists for: the whole slot lands in one atomic
-	/// storage write, so a save is never half-applied. <see cref="MultiFileSaveLayout"/> makes the
-	/// opposite trade — a scratch buffer the size of the largest single blob, at the cost of
-	/// cross-file atomicity.
+	/// <b>No payload copy.</b> Everything this layout writes precedes the shard data and all of it
+	/// is known before serialization starts, so it reserves the header through
+	/// <see cref="ISaveLayout.HeaderReservation"/> and the shards are serialized directly behind it.
+	/// The arena it receives is already the file, byte for byte, and goes to storage unchanged —
+	/// one buffer, no second arena, peak memory equal to the save. That the envelope must precede
+	/// the payload turned out not to force a copy at all; it only forces the size to be known
+	/// exactly, which <see cref="EnvelopeCodec.ExactEncodedSize"/> supplies.
 	/// </remarks>
 	public sealed class SingleFileSaveLayout : ISaveLayout, ISlotKeyMapper
 	{
@@ -39,6 +39,9 @@ namespace Saesentsessis.Persistence.Layout
 		private const int RangeSize = 24;
 
 		private readonly IStorage _storage;
+
+		// One per layout, re-pointed at each save's reserved header. Never per-save garbage.
+		private readonly FixedBufferWriter _headerWriter = new();
 
 		public SingleFileSaveLayout(IStorage storage)
 		{
@@ -48,29 +51,28 @@ namespace Saesentsessis.Persistence.Layout
 		// Single-file packing rewrites the whole payload, so every shard is needed.
 		public bool RequiresFullSnapshot => true;
 
-		public async TaskType WriteAsync(string slot, SaveEnvelope envelope, NativeArray<byte> payload,
+		/// <inheritdoc />
+		/// <remarks>
+		/// Everything this layout puts in the file precedes the payload, and all of it is known
+		/// before a shard is serialized — the envelope is built by <c>SaveManager</c> first, and the
+		/// range block is a multiplication. So the whole header is reserved up front and the shards
+		/// land behind it.
+		/// </remarks>
+		public int HeaderReservation(in SaveEnvelope envelope, int blobCount)
+			=> EnvelopeCodec.ExactEncodedSize(envelope) + 4 + blobCount * RangeSize + 4;
+
+		/// <inheritdoc />
+		/// <remarks>
+		/// The arena arrives with the header space already reserved, so this fills it in place and
+		/// hands the same memory to storage. There is no second buffer and no payload copy: the
+		/// arena <i>is</i> the file.
+		/// </remarks>
+		public TaskType WriteAsync(string slot, SaveEnvelope envelope, NativeArray<byte> payload,
 			NativeArray<ShardBlobRange> ranges, CancellationToken cancellation = default)
 		{
-			// Every section reserved exactly, the record block included. A flat guess for the envelope
-			// is what makes this arena grow, and it grows at the worst moment: the last reservation is
-			// the payload's, so an under-sized arena doubles a payload-sized buffer to gain a few
-			// kilobytes. Records alone are 20 bytes each, so the old 1 KB allowance ran out at ~47
-			// shards — well inside normal use.
-			var capacity = EnvelopeCodec.MaxEncodedSize(envelope)
-				+ 4 + ranges.Length * RangeSize
-				+ 4 + payload.Length;
+			PackHeader(envelope, payload, ranges);
 
-			var arena = new NativeListBufferWriter(capacity, Allocator.Persistent);
-
-			try
-			{
-				Pack(envelope, payload, ranges, arena);
-				await _storage.WriteAsync(slot, arena.AsArray(), cancellation);
-			}
-			finally
-			{
-				arena.Dispose();
-			}
+			return _storage.WriteAsync(slot, payload, cancellation);
 		}
 
 		public async SaveLayoutTask ReadAsync(string slot, Allocator allocator, CancellationToken cancellation = default)
@@ -108,13 +110,32 @@ namespace Saesentsessis.Persistence.Layout
 			return storageKey.IsEmpty == false;
 		}
 
-		private static void Pack(in SaveEnvelope envelope, NativeArray<byte> payload,
-			NativeArray<ShardBlobRange> ranges, NativeListBufferWriter writer)
+		/// <summary>
+		/// Fills the reserved head of <paramref name="arena"/> with envelope, ranges and payload
+		/// length, then checksums the whole buffer.
+		/// </summary>
+		/// <remarks>
+		/// Synchronous because spans are forbidden in async methods, and separated from the write so
+		/// the reservation arithmetic sits next to the code that consumes it.
+		/// </remarks>
+		private unsafe void PackHeader(in SaveEnvelope envelope, NativeArray<byte> arena,
+			NativeArray<ShardBlobRange> ranges)
 		{
-			EnvelopeCodec.Write(envelope, writer);
+			var header = HeaderReservation(envelope, ranges.Length);
+
+			if (arena.Length < header)
+				throw new InvalidOperationException(
+					$"[SingleFileSaveLayout] Arena is {arena.Length} bytes, shorter than the {header}-byte header " +
+					"it reserved. The pipeline did not honour HeaderReservation.");
+
+			// One reusable writer, re-pointed per save; it throws rather than growing, so a
+			// disagreement with ExactEncodedSize surfaces here instead of eating payload bytes.
+			_headerWriter.Reset((byte*)arena.GetUnsafePtr(), header);
+
+			EnvelopeCodec.Write(envelope, _headerWriter);
 
 			var rangeBytes = 4 + ranges.Length * RangeSize;
-			var span = writer.GetSpan(rangeBytes);
+			var span = _headerWriter.GetSpan(rangeBytes);
 			BinaryPrimitives.WriteInt32LittleEndian(span, ranges.Length);
 			var offset = 4;
 
@@ -122,21 +143,21 @@ namespace Saesentsessis.Persistence.Layout
 			{
 				BinaryPrimitives.WriteUInt64LittleEndian(span[offset..], range.Id.Head);
 				BinaryPrimitives.WriteUInt64LittleEndian(span[(offset + 8)..], range.Id.Tail);
-				BinaryPrimitives.WriteInt32LittleEndian(span[(offset + 16)..], range.Offset);
+
+				// Arena offsets are absolute and include the header; the file's are payload-relative.
+				BinaryPrimitives.WriteInt32LittleEndian(span[(offset + 16)..], range.Offset - header);
 				BinaryPrimitives.WriteInt32LittleEndian(span[(offset + 20)..], range.Length);
 				offset += RangeSize;
 			}
 
-			writer.Advance(rangeBytes);
+			_headerWriter.Advance(rangeBytes);
 
-			var payloadSpan = writer.GetSpan(4 + payload.Length);
-			BinaryPrimitives.WriteInt32LittleEndian(payloadSpan, payload.Length);
-			payload.AsReadOnlySpan().CopyTo(payloadSpan[4..]);
-			writer.Advance(4 + payload.Length);
+			var lengthSpan = _headerWriter.GetSpan(4);
+			BinaryPrimitives.WriteInt32LittleEndian(lengthSpan, arena.Length - header);
+			_headerWriter.Advance(4);
 
-			// Hash covers everything past the checksum field — envelope body,
-			// ranges and payload alike.
-			EnvelopeCodec.PatchChecksum(writer.AsArray().AsSpan());
+			// Hash covers everything past the checksum field — envelope body, ranges and payload.
+			EnvelopeCodec.PatchChecksum(arena.AsSpan());
 		}
 
 		private static SaveLayoutResult Unpack(NativeArray<byte> data, Allocator allocator)

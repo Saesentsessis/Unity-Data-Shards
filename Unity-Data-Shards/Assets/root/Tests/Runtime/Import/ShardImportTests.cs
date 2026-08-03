@@ -124,7 +124,7 @@ namespace Saesentsessis.Persistence.Tests
 		[UnityTest]
 		public IEnumerator Import_RoundTripsAndLeavesLegacySourceIntact() => AsyncTest.Run(async () =>
 		{
-			var manager = CreateManager(out var storage);
+			using var manager = CreateManager(out var storage);
 			var ids = new[] { Guid.NewGuid(), Guid.NewGuid() };
 
 			var pipeline = new ShardImportPipelineBuilder(manager)
@@ -148,7 +148,7 @@ namespace Saesentsessis.Persistence.Tests
 		[UnityTest]
 		public IEnumerator Import_SecondRun_SkipsExistingSave() => AsyncTest.Run(async () =>
 		{
-			var manager = CreateManager(out var storage);
+			using var manager = CreateManager(out var storage);
 
 			await new ShardImportPipelineBuilder(manager)
 				.AddImporter(new BlobImporter(background: false, new[] { Guid.NewGuid() }))
@@ -172,7 +172,7 @@ namespace Saesentsessis.Persistence.Tests
 		[UnityTest]
 		public IEnumerator Import_Overwrite_ReimportsOverExistingSave() => AsyncTest.Run(async () =>
 		{
-			var manager = CreateManager(out _);
+			using var manager = CreateManager(out _);
 
 			await new ShardImportPipelineBuilder(manager)
 				.AddImporter(new BlobImporter(background: false, new[] { Guid.NewGuid() }))
@@ -194,7 +194,7 @@ namespace Saesentsessis.Persistence.Tests
 		[UnityTest]
 		public IEnumerator Import_BackgroundImporter_RunsOffMainThread() => AsyncTest.Run(async () =>
 		{
-			var manager = CreateManager(out _);
+			using var manager = CreateManager(out _);
 			var background = new BlobImporter(background: true, new[] { Guid.NewGuid() });
 			var main = new BlobImporter(background: false, new[] { Guid.NewGuid() });
 
@@ -215,7 +215,7 @@ namespace Saesentsessis.Persistence.Tests
 		[UnityTest]
 		public IEnumerator Import_SyncGroup_RunsInParallelWithBackgroundGroup() => AsyncTest.Run(async () =>
 		{
-			var manager = CreateManager(out _);
+			using var manager = CreateManager(out _);
 			using var gate = new ManualResetEventSlim(false);
 			var signalled = false;
 
@@ -240,7 +240,7 @@ namespace Saesentsessis.Persistence.Tests
 		[UnityTest]
 		public IEnumerator Import_SyncImporterThrows_SurfacesAndStillJoins() => AsyncTest.Run(async () =>
 		{
-			var manager = CreateManager(out _);
+			using var manager = CreateManager(out _);
 			var background = new BlobImporter(background: true, new[] { Guid.NewGuid() });
 
 			var pipeline = new ShardImportPipelineBuilder(manager)
@@ -260,7 +260,7 @@ namespace Saesentsessis.Persistence.Tests
 		[UnityTest]
 		public IEnumerator Import_BackgroundImporterThrows_Surfaces() => AsyncTest.Run(async () =>
 		{
-			var manager = CreateManager(out _);
+			using var manager = CreateManager(out _);
 
 			var pipeline = new ShardImportPipelineBuilder(manager)
 				.AddImporter(new ThrowingImporter(background: true))
@@ -277,7 +277,7 @@ namespace Saesentsessis.Persistence.Tests
 		[UnityTest]
 		public IEnumerator Import_DuplicateIdsAcrossImporters_ThrowsNamingImporter() => AsyncTest.Run(async () =>
 		{
-			var manager = CreateManager(out _);
+			using var manager = CreateManager(out _);
 			var shared = Guid.NewGuid();
 
 			var pipeline = new ShardImportPipelineBuilder(manager)
@@ -297,7 +297,7 @@ namespace Saesentsessis.Persistence.Tests
 		[UnityTest]
 		public IEnumerator Import_BatchesPayloadsOfTheSameTypeIntoOneStep() => AsyncTest.Run(async () =>
 		{
-			var manager = CreateManager(out _);
+			using var manager = CreateManager(out _);
 			var importer = new RecordingImporter(background: true);
 			var payloads = new[] { Blob(), Blob(), Blob(), Blob() };
 
@@ -316,7 +316,7 @@ namespace Saesentsessis.Persistence.Tests
 		[UnityTest]
 		public IEnumerator Import_MultipleImportersForSameType_AllRun() => AsyncTest.Run(async () =>
 		{
-			var manager = CreateManager(out _);
+			using var manager = CreateManager(out _);
 			var first = new BlobImporter(background: false, new[] { Guid.NewGuid() });
 			var second = new BlobImporter(background: false, new[] { Guid.NewGuid() });
 
@@ -334,7 +334,7 @@ namespace Saesentsessis.Persistence.Tests
 		[UnityTest]
 		public IEnumerator Import_DuplicateWithinBatch_NamesOffendingPayload() => AsyncTest.Run(async () =>
 		{
-			var manager = CreateManager(out _);
+			using var manager = CreateManager(out _);
 			var collision = Guid.NewGuid();
 
 			// Payload 2 repeats payload 1's id.
@@ -362,7 +362,7 @@ namespace Saesentsessis.Persistence.Tests
 		[UnityTest]
 		public IEnumerator Import_StepOrderFollowsRegistrationOrder() => AsyncTest.Run(async () =>
 		{
-			var manager = CreateManager(out _);
+			using var manager = CreateManager(out _);
 			var firstId = Guid.NewGuid();
 			var secondId = Guid.NewGuid();
 
@@ -381,7 +381,7 @@ namespace Saesentsessis.Persistence.Tests
 		[Test]
 		public void Build_PayloadWithoutImporter_ThrowsNamingType()
 		{
-			var manager = CreateManager(out _);
+			using var manager = CreateManager(out _);
 
 			var exception = Assert.Throws<InvalidOperationException>(() =>
 				new ShardImportPipelineBuilder(manager).AddData(Blob()).Build());
@@ -393,7 +393,7 @@ namespace Saesentsessis.Persistence.Tests
 		[UnityTest]
 		public IEnumerator Build_ImporterWithoutPayload_WarnsButSucceeds() => AsyncTest.Run(async () =>
 		{
-			var manager = CreateManager(out _);
+			using var manager = CreateManager(out _);
 
 			LogAssert.Expect(LogType.Warning, new Regex(nameof(OtherImporter)));
 
@@ -412,7 +412,7 @@ namespace Saesentsessis.Persistence.Tests
 		[Test]
 		public void EmptyPipeline_Throws()
 		{
-			var manager = CreateManager(out _);
+			using var manager = CreateManager(out _);
 			Assert.Throws<InvalidOperationException>(() => new ShardImportPipelineBuilder(manager).Build());
 		}
 

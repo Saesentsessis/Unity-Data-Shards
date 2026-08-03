@@ -48,15 +48,45 @@ namespace Saesentsessis.Persistence.Storage
 		/// </remarks>
 		public TransformStorage(IStorage inner, params IStorageTransform[] transforms)
 		{
-			_inner = inner ?? throw new ArgumentNullException(nameof(inner));
-			_transforms = transforms ?? Array.Empty<IStorageTransform>();
+			transforms ??= Array.Empty<IStorageTransform>();
 
-			// Runs once per storage, and turns a null element into a message that names the slot
-			// instead of a NullReferenceException on the first save.
-			for (var i = _transforms.Length - 1; i >= 0; i--)
-				if (_transforms[i] == null)
-					throw new ArgumentNullException(nameof(transforms),
-						$"Transform at index {i} of {_transforms.Length} is null.");
+			try
+			{
+				if (inner == null)
+					throw new ArgumentNullException(nameof(inner));
+
+				// Runs once per storage, and turns a null element into a message that names the slot
+				// instead of a NullReferenceException on the first save.
+				for (var i = transforms.Length - 1; i >= 0; i--)
+					if (transforms[i] == null)
+						throw new ArgumentNullException(nameof(transforms),
+							$"Transform at index {i} of {transforms.Length} is null.");
+			}
+			catch
+			{
+				// This storage owns everything it is handed and releases it in Dispose. A
+				// constructor that throws never produces the object that would do the releasing,
+				// and the call site usually holds no reference of its own — in
+				// `new TransformStorage(inner, new XorTransform(key), null)` there is nowhere to
+				// dispose that XorTransform from, and its native pattern buffer would leak. So a
+				// failed construction releases exactly what a successful one would have.
+				ReleaseChain(inner, transforms);
+
+				throw;
+			}
+
+			_inner = inner;
+			_transforms = transforms;
+		}
+
+		/// <summary>Disposes an owned chain. Tolerates nulls: it runs on the failure path.</summary>
+		private static void ReleaseChain(IStorage inner, IStorageTransform[] transforms)
+		{
+			foreach (var transform in transforms)
+				if (transform is IDisposable disposable)
+					disposable.Dispose();
+
+			inner?.Dispose();
 		}
 
 		public async StorageReadTask TryReadAsync(string key, Allocator allocator, CancellationToken cancellation = default)

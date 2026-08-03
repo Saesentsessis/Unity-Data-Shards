@@ -18,6 +18,8 @@ namespace Saesentsessis.Persistence.Serialization.Newtonsoft
 	{
 		private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
 
+		[ThreadStatic] private static BufferWriterTextWriter _textWriter;
+
 		private readonly JsonSerializer _serializer;
 
 		public NewtonsoftJsonSerializer(JsonSerializerSettings settings = null)
@@ -47,15 +49,31 @@ namespace Saesentsessis.Persistence.Serialization.Newtonsoft
 		// Newtonsoft is thread-safe for plain data types.
 		public bool SupportsBackgroundSerialization => true;
 
+		/// <inheritdoc />
+		/// <remarks>
+		/// Emits straight into the arena. Newtonsoft targets <c>TextWriter</c>, so the obvious
+		/// bridge is a <c>StringBuilder</c> plus <c>ToString()</c> — which costs a payload-sized
+		/// string and a payload-sized encode per shard, and made this the most allocation-hungry
+		/// serializer in the package. <see cref="BufferWriterTextWriter"/> removes both.
+		/// <para>
+		/// The adapter is <c>[ThreadStatic]</c> rather than a field:
+		/// <see cref="SupportsBackgroundSerialization"/> is true, so this runs on pool threads, and
+		/// one serializer instance may be shared by several managers. Per-thread reuse keeps it
+		/// allocation-free without assuming a caller.
+		/// </para>
+		/// </remarks>
 		public void Serialize(object value, Type type, IBufferWriter<byte> writer)
 		{
-			// Newtonsoft targets TextWriter, not bytes; serialize to a string then UTF-8 encode
-			// in a single pass into the arena, mirroring UnityJsonSerializer.
-			var json = SerializeToString(value, type);
+			var text = _textWriter ??= new BufferWriterTextWriter();
+			text.Reset(writer);
 
-			var span = writer.GetSpan(Utf8NoBom.GetMaxByteCount(json.Length));
-			var written = Utf8NoBom.GetBytes(json.AsSpan(), span);
-			writer.Advance(written);
+			// CloseOutput: the adapter wraps the pipeline's arena, and disposing the JSON writer
+			// must not be able to end the save.
+			using (var jsonWriter = new JsonTextWriter(text) { CloseOutput = false })
+				_serializer.Serialize(jsonWriter, value, type);
+
+			// Settles any surrogate half the encoder is still carrying.
+			text.Flush();
 		}
 
 		public object Deserialize(ReadOnlySpan<byte> data, Type type)
@@ -66,16 +84,6 @@ namespace Saesentsessis.Persistence.Serialization.Newtonsoft
 			return _serializer.Deserialize(reader, type);
 		}
 
-		private string SerializeToString(object value, Type type)
-		{
-			var builder = new StringBuilder(256);
-
-			using (var writer = new System.IO.StringWriter(builder))
-			using (var jsonWriter = new JsonTextWriter(writer))
-				_serializer.Serialize(jsonWriter, value, type);
-
-			return builder.ToString();
-		}
 	}
 }
 #endif

@@ -1,8 +1,8 @@
 {
   "dependencies": {
     "com.github-glitchenzo.nugetforunity": "https://github.com/GlitchEnzo/NuGetForUnity.git?path=/src/NuGetForUnity",
-    "com.unity.burst": "1.8.29",
-    "com.unity.collections": "2.6.7",
+    "com.unity.burst": "1.8.30",
+    "com.unity.collections": "2.6.8",
     "com.unity.ide.rider": "3.0.40",
     "com.unity.services.authentication": "3.7.3",
     "com.unity.services.cloudsave": "3.4.1",

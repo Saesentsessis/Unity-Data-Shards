@@ -27,15 +27,31 @@ namespace Saesentsessis.Persistence.Serialization
         // (no UnityEngine.Object access), which is the shard contract.
         public bool SupportsBackgroundSerialization => true;
 
+        /// <inheritdoc />
+        /// <remarks>
+        /// Reserves the <b>exact</b> encoded length rather than the three-bytes-per-char worst case.
+        /// The worst case looked free — one reservation, one encode, no pre-pass — but it asked the
+        /// arena for three times what it wrote, and the arena is pre-sized to the previous save's
+        /// payload. Demanding <c>P + 2·blob</c> at the last shard exceeded that every time, so the
+        /// arena doubled and memcpy'd everything already written, on every save, invisibly.
+        /// <para>
+        /// <see cref="Encoding.GetByteCount(string)"/> is a second pass over a string that is still
+        /// in cache and allocates nothing — a far better trade than a payload-sized reallocation.
+        /// </para>
+        /// <para>
+        /// The string <see cref="JsonUtility"/> returns is what this serializer cannot avoid:
+        /// there is no streaming entry point, so a UTF-16 copy of every shard is inherent to the
+        /// backend. Use a buffer-native serializer where that matters.
+        /// </para>
+        /// </remarks>
         public void Serialize(object value, Type type, IBufferWriter<byte> writer)
         {
             var json = JsonUtility.ToJson(value, _prettyPrint);
 
-            // Worst-case UTF-8 length for UTF-16 input is 3 bytes/char, so one
-            // GetSpan reservation + one encode pass — no GetByteCount pre-pass.
-            var span = writer.GetSpan(json.Length * 3);
-            var written = Utf8NoBom.GetBytes(json.AsSpan(), span);
-            writer.Advance(written);
+            var byteCount = Utf8NoBom.GetByteCount(json);
+            var span = writer.GetSpan(byteCount);
+
+            writer.Advance(Utf8NoBom.GetBytes(json.AsSpan(), span));
         }
 
         public object Deserialize(ReadOnlySpan<byte> data, Type type)

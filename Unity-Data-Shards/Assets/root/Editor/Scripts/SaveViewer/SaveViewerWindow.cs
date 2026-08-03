@@ -42,7 +42,7 @@ namespace Saesentsessis.Persistence.Editor.SaveViewer
 	/// </remarks>
 	public sealed class SaveViewerWindow : EditorWindow
 	{
-		private const string MenuPath = "Tools/Saesentsessis/Persistence/Save Viewer";
+		private const string MenuPath = "Window/Saesentsessis/Persistence/Save Viewer";
 
 		private const float Padding = 6f;
 		private const float SlotListHeight = 160f;

@@ -5,7 +5,7 @@ using Saesentsessis.Persistence.Core;
 using Saesentsessis.Persistence.Storage.Transforms;
 using ZstdSharp;
 
-namespace Saesentsessis.Persistence.Storage.Zstd
+namespace Saesentsessis.Persistence.Storage.Transforms.Zstd
 {
 	/// <summary>
 	/// Zstandard compression backed by ZstdSharp — a pure managed C# port of zstd, so like the LZ4
@@ -76,7 +76,22 @@ namespace Saesentsessis.Persistence.Storage.Zstd
 			using var decompressor = new Decompressor();
 
 			var target = dst.GetSpan(originalLength)[..originalLength];
-			var decoded = decompressor.Unwrap(body, target);
+			int decoded;
+
+			try
+			{
+				decoded = decompressor.Unwrap(body, target);
+			}
+			catch (ZstdException exception)
+			{
+				// ZstdSharp signals a malformed, truncated or mis-sized frame by throwing its own
+				// type. Everything reaching this method came off disk and is untrusted, so it has to
+				// surface as the package's corruption signal — a caller catching SaveCorruptedException
+				// to offer "restore backup?" cannot be expected to also know ZstdSharp's exceptions.
+				throw new SaveCorruptedException(
+					$"Zstd decompression failed: {exception.Message}",
+					SaveCorruptedExceptionReason.EnvelopeTruncated);
+			}
 
 			if (decoded != originalLength)
 				throw new SaveCorruptedException(

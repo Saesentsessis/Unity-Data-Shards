@@ -8,8 +8,10 @@ using System.IO;
 using System.Threading;
 using Saesentsessis.Persistence.Core;
 using Unity.Collections;
+using Unity.Collections.LowLevel.Unsafe;
 using Unity.Services.Authentication;
 using Unity.Services.CloudSave;
+using Unity.Services.CloudSave.Models;
 #if PERSISTENCE_HAS_UNITASK
 using TaskType = Cysharp.Threading.Tasks.UniTask;
 using BoolTask = Cysharp.Threading.Tasks.UniTask<bool>;
@@ -112,9 +114,31 @@ namespace Saesentsessis.Persistence.Storage.CloudSave
 					$"{MaxFileBytes}-byte per-file limit. Caught here rather than after the upload has already " +
 					"spent the player's bandwidth.");
 
-			// UGS takes a managed byte[]; the NativeArray cannot be handed over directly.
-			await CloudSaveService.Instance.Files.Player.SaveAsync(ResolveKey(key), data.ToArray());
+			// The Stream overload rather than the byte[] one: ToArray() would copy the whole save
+			// into managed memory purely to hand it over. An UnmanagedMemoryStream reads the
+			// NativeArray in place, and the caller's buffer-lifetime contract already guarantees it
+			// stays valid until this task completes.
+			await WriteStreamAsync(ResolveKey(key), data);
 		}
+
+		/// <summary>
+		/// Uploads the buffer through an <see cref="UnmanagedMemoryStream"/> over its own memory.
+		/// </summary>
+		/// <remarks>
+		/// Split out because the pointer and the <c>unsafe</c> block cannot live in an async method
+		/// alongside the await. The stream is disposed before the upload is awaited only in the
+		/// sense that it is created here and handed over — UGS reads it during the returned task,
+		/// which is why the <c>using</c> spans the await.
+		/// </remarks>
+		private static async TaskType WriteStreamAsync(string resolvedKey, NativeArray<byte> data)
+		{
+			using var stream = CreateStream(data);
+
+			await CloudSaveService.Instance.Files.Player.SaveAsync(resolvedKey, stream);
+		}
+
+		private static unsafe UnmanagedMemoryStream CreateStream(NativeArray<byte> data)
+			=> new((byte*)data.GetUnsafeReadOnlyPtr(), data.Length);
 
 		public async BoolTask ExistsAsync(string key, CancellationToken cancellation = default)
 		{
@@ -177,10 +201,8 @@ namespace Saesentsessis.Persistence.Storage.CloudSave
 			if (files == null)
 				return 0;
 
-			for (var i = 0; i < files.Count; i++)
+			foreach (var file in files)
 			{
-				var file = files[i];
-
 				// FileItem also reports a last-modified time, deliberately not read here: its member
 				// type could not be confirmed without the package installed, and a wrong guess would
 				// break the build for exactly the projects that do have it. Zero means "backend
